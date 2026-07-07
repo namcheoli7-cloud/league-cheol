@@ -18,8 +18,8 @@ body{font-family:'Noto Sans KR',-apple-system,sans-serif;background:var(--surfac
 .back-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}
 .hdr-tag{font-size:13px;font-weight:700;background:rgba(255,255,255,.15);padding:4px 12px;border-radius:6px;}
 .tabs{background:var(--surface);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;}
-.tab{padding:13px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--text3);border-bottom:2px solid transparent;white-space:nowrap;}
-.tab.on{color:var(--blue);border-bottom-color:var(--blue);}
+.tab{flex:1;padding:20px 18px;border:none;background:none;cursor:pointer;font-size:18px;font-weight:700;color:var(--text3);border-bottom:4px solid transparent;white-space:nowrap;min-width:110px;}
+.tab.on{color:var(--blue);border-bottom-color:var(--blue);background:var(--blue-lt);}
 .content{padding:16px;max-width:1100px;margin:0 auto;}
 .page{display:none;}.page.on{display:block;}
 .panel{display:none;}.panel.on{display:block;}
@@ -61,6 +61,17 @@ input:focus,select:focus{border-color:var(--blue);}
 .table-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--rl);overflow:hidden;}
 .table-card.playing{border-color:#74c0fc;box-shadow:0 0 0 3px #dbe9f7;}
 .table-card.empty{border-style:dashed;opacity:.55;}
+.table-card.elapsed-mid{border-color:#2f9e44;box-shadow:0 0 0 3px #d3f9d8;}
+.table-card.elapsed-mid .tc-head{background:#2f9e44;}
+.table-card.elapsed-warn{border-color:#e67700;box-shadow:0 0 0 3px #ffe8cc;}
+.table-card.elapsed-warn .tc-head{background:#e67700;}
+.table-card.elapsed-over{border-color:#c92a2a;box-shadow:0 0 0 3px #ffe3e3;}
+.table-card.elapsed-over .tc-head{background:#c92a2a;}
+.table-card.elapsed-urgent{border-color:#9c2020;box-shadow:0 0 0 4px #ffc9c9;animation:pulse-card 1.4s ease-in-out infinite;}
+.table-card.elapsed-urgent .tc-head{background:#9c2020;}
+@keyframes pulse-card{0%,100%{box-shadow:0 0 0 3px #ffc9c9;}50%{box-shadow:0 0 0 7px rgba(156,32,32,.25);}}
+.elapsed-legend{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;font-size:11px;color:var(--text3);margin:10px 0 4px;}
+.elapsed-legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle;}
 .tc-head{background:var(--blue);color:#fff;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;font-size:12px;}
 .tc-head.empty-head{background:var(--surface3);color:var(--text3);}
 .tc-body{padding:14px;}
@@ -80,7 +91,6 @@ input:focus,select:focus{border-color:var(--blue);}
 .p-item .p-body{flex:1;overflow:hidden;cursor:pointer;}
 .tc-save{width:100%;padding:9px;background:var(--green);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;}
 .tc-referee{margin-top:8px;text-align:center;font-size:12px;color:var(--text2);background:var(--surface2);border-radius:6px;padding:5px;}
-.tc-skip{margin-top:6px;width:100%;padding:5px;background:#fff5f5;color:var(--red);border:1px solid #ffc9c9;border-radius:6px;font-size:11px;cursor:pointer;}
 .qs-item{background:var(--surface2);border-radius:var(--r);padding:6px 12px;font-size:12px;display:inline-block;margin-right:6px;margin-bottom:8px;}
 .sw{overflow-x:auto;}
 table.rt{width:100%;border-collapse:collapse;}
@@ -205,6 +215,13 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
         </div>
         <div id="absent-area" style="margin-bottom:12px;"></div>
         <div id="q-summary"></div>
+        <div class="elapsed-legend">
+          <span><span class="dot" style="background:#74c0fc"></span>30초 미만</span>
+          <span><span class="dot" style="background:#2f9e44"></span>30초~</span>
+          <span><span class="dot" style="background:#e67700"></span>2분~</span>
+          <span><span class="dot" style="background:#c92a2a"></span>3분~</span>
+          <span><span class="dot" style="background:#9c2020"></span>4분~</span>
+        </div>
         <div class="table-grid" id="table-grid"></div>
       </div>
       <div class="card" id="done-card" style="display:none">
@@ -340,6 +357,29 @@ let matches = {};           // {id: {...}}
 let leaguesIndex = {};       // 홈 화면용 {id: meta}
 let isTeacher = false;
 let studentLocked = false;
+let elapsedTicker = null;
+function applyElapsedClass(card, sec){
+  card.classList.remove('elapsed-mid','elapsed-warn','elapsed-over','elapsed-urgent');
+  if (sec >= 4*60) card.classList.add('elapsed-urgent');
+  else if (sec >= 3*60) card.classList.add('elapsed-over');
+  else if (sec >= 2*60) card.classList.add('elapsed-warn');
+  else if (sec >= 30) card.classList.add('elapsed-mid');
+}
+function tickElapsed(){
+  document.querySelectorAll('.table-card.playing').forEach(function(card){
+    const at = card.getAttribute('data-assigned');
+    if (!at) return;
+    applyElapsedClass(card, Math.floor((Date.now()-Number(at))/1000));
+  });
+}
+function startElapsedTicker(){
+  if (elapsedTicker) clearInterval(elapsedTicker);
+  tickElapsed();
+  elapsedTicker = setInterval(tickElapsed, 1000);
+}
+function clearElapsedTicker(){
+  if (elapsedTicker){ clearInterval(elapsedTicker); elapsedTicker=null; }
+}
 let adminUnlocked = false;
 let newTeamSize = 1;
 let mergeMode = 'mixed';
@@ -375,6 +415,7 @@ function showWorkspace(){
 function confirmSwitchWorkspace(){
   if (localStorage.getItem(STUDENT_LOCK_KEY)){ toast('학생 입력 전용 태블릿에서는 코드 전환이 제한됩니다. 잠금 해제 후 이용하세요','err'); return; }
   if (!confirm('다른 코드로 전환할까요? (지금 코드: '+workspaceCode+')\n전환해도 각 코드의 데이터는 그대로 보존됩니다.')) return;
+  clearElapsedTicker();
   if (listenersAttached && league){ wref('leagues/'+league._id).off(); listenersAttached=false; }
   db.ref('workspaces/'+workspaceCode+'/leagues').off();
   localStorage.removeItem(WS_STORAGE_KEY);
@@ -621,6 +662,7 @@ function enterLeague(id){
 }
 function goHome(){
   currentLeagueId=null;
+  clearElapsedTicker();
   if (listenersAttached){ wref('leagues/'+ (league?league._id:'')).off(); }
   document.getElementById('page-league').classList.remove('on');
   document.getElementById('page-home').classList.add('on');
@@ -844,7 +886,7 @@ function runAssignment(){
       const m = matches[mid];
       const involved = m.teamA.concat(m.teamB);
       if (involved.some(pid=>busy[pid])) continue;
-      m.status='playing'; m.tableNum=t;
+      m.status='playing'; m.tableNum=t; m.assignedAt=Date.now();
       involved.forEach(pid=>busy[pid]=true);
       playingByGroup[m.group]=(playingByGroup[m.group]||0)+1;
       break;
@@ -903,7 +945,7 @@ function renderSchedule(){
     if (mid){
       const m = matches[mid];
       const gName = (league.groupNames||[])[m.group] || ('그룹'+(m.group+1));
-      html += `<div class="table-card playing">
+      html += `<div class="table-card playing" data-assigned="${m.assignedAt||''}">
         <div class="tc-head"><b>🏓 테이블 ${t}</b><span>${esc(gName)} · R${m.round}</span></div>
         <div class="tc-body">
           <div class="tc-match">
@@ -918,7 +960,6 @@ function renderSchedule(){
           </div>
           <button class="tc-save" onclick="submitScore('${mid}')">제출</button>
           ${m.referee?`<div class="tc-referee">🧑‍⚖️ 심판: <b>${esc(playerName(m.referee))}</b></div>`:''}
-          ${!studentLocked?`<button class="tc-skip" onclick="skipMatch('${mid}')">🚫 이 경기 취소</button>`:''}
         </div>
       </div>`;
     } else {
@@ -926,6 +967,7 @@ function renderSchedule(){
     }
   }
   grid.innerHTML = html || '<div class="empty"><div class="ei">🗓</div>대진표를 먼저 생성하세요.</div>';
+  startElapsedTicker();
 
   const done = mids.filter(id=>matches[id].status==='done');
   const waiting = mids.filter(id=>matches[id].status==='waiting');
@@ -992,16 +1034,6 @@ function editDoneScore(mid){
   showOverlay('수정 중...');
   wref('leagues/'+league._id+'/matches/'+mid).update({ scoreA:Number(sa), scoreB:Number(sb) })
     .then(function(){ hideOverlay(); toast('점수 수정 완료 ✓','ok'); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
-function skipMatch(mid){
-  if (!confirm('이 경기를 취소하고 다음 경기를 배정할까요?')) return;
-  const m = matches[mid];
-  m.status='skipped'; m.tableNum=null; m.referee=null;
-  showOverlay('처리 중...');
-  wref('leagues/'+league._id+'/matches/'+mid).set(m)
-    .then(runAssignment)
-    .then(function(){ hideOverlay(); toast('취소 완료','ok'); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
 }
 function doChangeTableCount(v){
