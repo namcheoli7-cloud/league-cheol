@@ -42,6 +42,8 @@ input:focus,select:focus{border-color:var(--blue);}
 .cls-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--rl);padding:20px 14px;text-align:center;cursor:pointer;position:relative;}
 .cls-card:hover{border-color:var(--blue);}
 .cls-card.merged{border-color:#d6a8f0;}
+.cls-del-btn{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:#fff;color:var(--text3);font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.cls-del-btn:hover{background:var(--red);color:#fff;border-color:var(--red);}
 .cls-icon{font-size:28px;margin-bottom:6px;}
 .cls-name{font-size:15px;font-weight:700;}
 .cls-sub{font-size:11px;color:var(--text3);margin-top:4px;}
@@ -115,6 +117,7 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
 <div class="hdr">
   <button class="back-btn" id="back-btn" style="display:none" onclick="goHome()">← 목록</button>
   <h1>🏸🏓 리그전 통합 관리</h1>
+  <span class="hdr-tag" id="ws-tag" style="display:none;cursor:pointer" onclick="confirmSwitchWorkspace()" title="클릭하면 다른 코드로 전환"></span>
   <span class="hdr-tag" id="hdr-tag" style="display:none"></span>
 </div>
 
@@ -126,8 +129,25 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
 
 <div class="content">
 
+  <!-- 교사 코드 입력 화면 (최초 진입 시) -->
+  <div id="page-gate" class="page on">
+    <div class="card" style="max-width:420px;margin:40px auto;">
+      <div class="card-head">🔑 교사 코드 입력</div>
+      <p class="hint" style="margin-bottom:14px;line-height:1.6;">
+        같은 학교 선생님들이 이 링크를 함께 쓰더라도, 각자 코드를 다르게 입력하면 서로의 학급 목록이 섞이지 않습니다.<br>
+        처음 한 번만 입력하면 이 기기(이 브라우저)에는 자동으로 저장됩니다.
+      </p>
+      <div class="field">
+        <label>내 코드 (자유롭게 정하세요 — 예: 이름, 담당학년 등)</label>
+        <input type="text" id="gate-code-input" placeholder="예: 이철남" onkeydown="if(event.key==='Enter')enterWorkspace()">
+        <span class="hint">한글/영문/숫자 사용 가능. 띄어쓰기와 특수문자(. # $ [ ] /)는 자동으로 제거됩니다.</span>
+      </div>
+      <button class="btn btn-blue" onclick="enterWorkspace()">입장하기</button>
+    </div>
+  </div>
+
   <!-- 홈: 리그 목록 -->
-  <div id="page-home" class="page on">
+  <div id="page-home" class="page">
     <div class="card">
       <div class="card-head">📚 진행중인 리그전
         <div style="margin-left:auto;display:flex;gap:8px;">
@@ -307,6 +327,46 @@ let adminUnlocked = false;
 let newTeamSize = 1;
 let mergeMode = 'mixed';
 let listenersAttached = false;
+let workspaceCode = null;
+const WS_STORAGE_KEY = 'league_workspace_code_v1';
+
+// ══════════════ 교사 코드(워크스페이스) ══════════════
+function sanitizeCode(raw){
+  return String(raw||'').trim().replace(/[.#$\[\]\/\s]/g,'');
+}
+function wref(path){
+  return db.ref('workspaces/'+workspaceCode+'/'+path);
+}
+function enterWorkspace(){
+  const raw = document.getElementById('gate-code-input').value;
+  const code = sanitizeCode(raw);
+  if (!code){ toast('코드를 입력하세요','err'); return; }
+  workspaceCode = code;
+  localStorage.setItem(WS_STORAGE_KEY, code);
+  showWorkspace();
+}
+function showWorkspace(){
+  document.getElementById('page-gate').classList.remove('on');
+  document.getElementById('page-home').classList.add('on');
+  document.getElementById('ws-tag').style.display = 'inline-block';
+  document.getElementById('ws-tag').textContent = '🔑 ' + workspaceCode;
+  loadHome();
+}
+function confirmSwitchWorkspace(){
+  if (!confirm('다른 코드로 전환할까요? (지금 코드: '+workspaceCode+')\n전환해도 각 코드의 데이터는 그대로 보존됩니다.')) return;
+  if (listenersAttached && league){ wref('leagues/'+league._id).off(); listenersAttached=false; }
+  db.ref('workspaces/'+workspaceCode+'/leagues').off();
+  localStorage.removeItem(WS_STORAGE_KEY);
+  workspaceCode = null; league=null; currentLeagueId=null;
+  document.getElementById('ws-tag').style.display='none';
+  document.getElementById('hdr-tag').style.display='none';
+  document.getElementById('tab-bar').style.display='none';
+  document.getElementById('back-btn').style.display='none';
+  document.getElementById('page-home').classList.remove('on');
+  document.getElementById('page-league').classList.remove('on');
+  document.getElementById('gate-code-input').value='';
+  document.getElementById('page-gate').classList.add('on');
+}
 
 // ══════════════ 공통 유틸 ══════════════
 function showOverlay(msg){ document.getElementById('ov-msg').textContent = msg||'처리 중...'; document.getElementById('overlay').classList.add('show'); }
@@ -320,7 +380,7 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 // ══════════════ 홈 화면 ══════════════
 function loadHome(){
   document.getElementById('league-grid').innerHTML = '<div class="empty">불러오는 중...</div>';
-  db.ref('leagues').on('value', function(snap){
+  wref('leagues').on('value', function(snap){
     leaguesIndex = {};
     snap.forEach(function(c){ leaguesIndex[c.key] = c.val().meta || {}; });
     renderHome();
@@ -334,6 +394,7 @@ function renderHome(){
     const m = leaguesIndex[id];
     const typeTag = m.teamSize===2 ? '🏸 복식' : '🏓 단식';
     return `<div class="cls-card${m.isMerged?' merged':''}" onclick="enterLeague('${id}')">
+      <button class="cls-del-btn" onclick="event.stopPropagation();deleteLeague('${id}','${esc(m.name||id).replace(/'/g,'')}')" title="삭제">✕</button>
       <div class="cls-icon">${m.isMerged?'🔀':'🏫'}</div>
       <div class="cls-name">${esc(m.name||id)}</div>
       <div class="cls-sub">${typeTag} · ${(m.groupNames||[]).length}그룹</div>
@@ -342,6 +403,17 @@ function renderHome(){
 }
 
 // ══════════════ 리그 생성 ══════════════
+function deleteLeague(id, name){
+  const m = leaguesIndex[id]||{};
+  const pw = prompt('『'+name+'』을(를) 완전히 삭제합니다.\n관리자 비밀번호를 입력하세요 (삭제 후 복구 불가):');
+  if (pw===null) return;
+  if (pw !== (m.adminPassword||'1234')){ toast('비밀번호가 틀렸습니다','err'); return; }
+  if (!confirm('정말로 『'+name+'』을(를) 삭제할까요?\n선수 명단·경기 기록이 모두 사라지며 되돌릴 수 없습니다.')) return;
+  showOverlay('삭제 중...');
+  wref('leagues/'+id).remove()
+    .then(function(){ hideOverlay(); toast('삭제 완료 ✓','ok'); })
+    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
+}
 function openCreateModal(){ setNewTeamSize(1); openModal('create-modal-bg'); }
 function setNewTeamSize(n){
   newTeamSize = n;
@@ -376,7 +448,7 @@ function doCreateLeague(){
     });
   }
   showOverlay('생성 중...');
-  db.ref('leagues/'+id).set({ meta: meta, players: playersObj, matches: {} })
+  wref('leagues/'+id).set({ meta: meta, players: playersObj, matches: {} })
     .then(function(){ hideOverlay(); closeModal('create-modal-bg'); toast('리그전 생성 완료 ✓','ok'); enterLeague(id); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
 }
@@ -401,7 +473,7 @@ function doCreateMerge(){
   const mA = leaguesIndex[idA], mB = leaguesIndex[idB];
   if (mA.teamSize !== mB.teamSize){ toast('두 반의 경기 유형(단식/복식)이 같아야 합니다','err'); return; }
   showOverlay('합반 명단 불러오는 중...');
-  Promise.all([db.ref('leagues/'+idA+'/players').once('value'), db.ref('leagues/'+idB+'/players').once('value')])
+  Promise.all([wref('leagues/'+idA+'/players').once('value'), wref('leagues/'+idB+'/players').once('value')])
     .then(function(res){
       const playersA = res[0].val()||{}, playersB = res[1].val()||{};
       const groupSet = [];
@@ -422,7 +494,7 @@ function doCreateMerge(){
         isMerged: true, sourceClasses: [mA.name, mB.name], mergeMode: mergeMode,
         tableCount: 4, refereeMode: false, adminPassword: mA.adminPassword||'1234', createdAt: Date.now()
       };
-      return db.ref('leagues/'+id).set({ meta: meta, players: merged, matches: {} }).then(()=>id);
+      return wref('leagues/'+id).set({ meta: meta, players: merged, matches: {} }).then(()=>id);
     })
     .then(function(id){ hideOverlay(); closeModal('merge-modal-bg'); toast('합반 생성 완료 ✓','ok'); enterLeague(id); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
@@ -443,7 +515,7 @@ function enterLeague(id){
 }
 function goHome(){
   currentLeagueId=null;
-  if (listenersAttached){ db.ref('leagues/'+ (league?league._id:'')).off(); }
+  if (listenersAttached){ wref('leagues/'+ (league?league._id:'')).off(); }
   document.getElementById('page-league').classList.remove('on');
   document.getElementById('page-home').classList.add('on');
   document.getElementById('tab-bar').style.display='none';
@@ -459,8 +531,8 @@ function goTab(id, btn){
 }
 
 function attachLeagueListeners(id){
-  if (listenersAttached && league) db.ref('leagues/'+league._id).off();
-  db.ref('leagues/'+id).on('value', function(snap){
+  if (listenersAttached && league) wref('leagues/'+league._id).off();
+  wref('leagues/'+id).on('value', function(snap){
     const val = snap.val();
     if (!val){ toast('리그 데이터를 찾을 수 없습니다','err'); return; }
     league = val.meta || {}; league._id = id;
@@ -517,7 +589,7 @@ function renderPlayers(){
   }
 }
 function toggleAbsentPlayer(pid){
-  db.ref('leagues/'+league._id+'/players/'+pid+'/absent').set(!players[pid].absent)
+  wref('leagues/'+league._id+'/players/'+pid+'/absent').set(!players[pid].absent)
     .then(function(){ applyAbsentLogic(); });
 }
 function openAddPlayerModal(){
@@ -531,7 +603,7 @@ function doAddPlayer(){
   const group = parseInt(document.getElementById('ap-group').value,10)||0;
   if (!name){ toast('이름을 입력하세요','err'); return; }
   const pid = uid();
-  db.ref('leagues/'+league._id+'/players/'+pid).set({ name:name, group:group, class:league.isMerged?'':league.name, absent:false })
+  wref('leagues/'+league._id+'/players/'+pid).set({ name:name, group:group, class:league.isMerged?'':league.name, absent:false })
     .then(function(){ closeModal('addplayer-modal-bg'); toast('추가 완료 ✓','ok'); });
 }
 
@@ -549,7 +621,7 @@ function doSavePlayerEdit(){
   const name = document.getElementById('ep-name').value.trim();
   const group = parseInt(document.getElementById('ep-group').value,10)||0;
   if (!name){ toast('이름을 입력하세요','err'); return; }
-  db.ref('leagues/'+league._id+'/players/'+editingPid).update({ name:name, group:group })
+  wref('leagues/'+league._id+'/players/'+editingPid).update({ name:name, group:group })
     .then(function(){ closeModal('editplayer-modal-bg'); toast('수정 완료 ✓','ok'); })
     .catch(function(e){ toast('오류: '+e.message,'err'); });
 }
@@ -557,7 +629,7 @@ function doDeletePlayerConfirm(){
   const p = players[editingPid];
   if (!p) return;
   if (!confirm(p.name+' 선수를 명단에서 삭제할까요?')) return;
-  db.ref('leagues/'+league._id+'/players/'+editingPid).remove()
+  wref('leagues/'+league._id+'/players/'+editingPid).remove()
     .then(function(){ closeModal('editplayer-modal-bg'); toast('삭제 완료 ✓','ok'); })
     .catch(function(e){ toast('오류: '+e.message,'err'); });
 }
@@ -608,7 +680,7 @@ function generateSchedule(){
       };
     });
   });
-  db.ref('leagues/'+league._id).update({ matches: newMatches, 'meta/tableCount': league.tableCount||4 })
+  wref('leagues/'+league._id).update({ matches: newMatches, 'meta/tableCount': league.tableCount||4 })
     .then(function(){
       matches = newMatches;
       return runAssignment();
@@ -699,7 +771,7 @@ function runAssignment(){
     });
   }
 
-  return db.ref('leagues/'+league._id+'/matches').set(matches);
+  return wref('leagues/'+league._id+'/matches').set(matches);
 }
 function applyAbsentLogic(){
   showOverlay('결석 반영 중...');
@@ -796,7 +868,7 @@ function submitScore(mid){
   m.scoreA = Number(sa); m.scoreB = Number(sb);
   m.status = 'done'; m.tableNum = null; m.referee = null;
   showOverlay('저장 중...');
-  db.ref('leagues/'+league._id+'/matches/'+mid).set(m)
+  wref('leagues/'+league._id+'/matches/'+mid).set(m)
     .then(runAssignment)
     .then(function(){ hideOverlay(); toast('저장 완료 ✓','ok'); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
@@ -806,7 +878,7 @@ function editDoneScore(mid){
   const sb = document.getElementById('dsb-'+mid).value.trim();
   if (sa===''||sb===''){ toast('점수를 입력하세요','err'); return; }
   showOverlay('수정 중...');
-  db.ref('leagues/'+league._id+'/matches/'+mid).update({ scoreA:Number(sa), scoreB:Number(sb) })
+  wref('leagues/'+league._id+'/matches/'+mid).update({ scoreA:Number(sa), scoreB:Number(sb) })
     .then(function(){ hideOverlay(); toast('점수 수정 완료 ✓','ok'); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
 }
@@ -815,7 +887,7 @@ function skipMatch(mid){
   const m = matches[mid];
   m.status='skipped'; m.tableNum=null; m.referee=null;
   showOverlay('처리 중...');
-  db.ref('leagues/'+league._id+'/matches/'+mid).set(m)
+  wref('leagues/'+league._id+'/matches/'+mid).set(m)
     .then(runAssignment)
     .then(function(){ hideOverlay(); toast('취소 완료','ok'); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
@@ -828,8 +900,8 @@ function doChangeTableCount(v){
     if (m.status==='playing' && m.tableNum>n){ m.status='waiting'; m.tableNum=null; m.referee=null; }
   });
   showOverlay('테이블 재배정 중...');
-  db.ref('leagues/'+league._id+'/meta/tableCount').set(n)
-    .then(()=>db.ref('leagues/'+league._id+'/matches').set(matches))
+  wref('leagues/'+league._id+'/meta/tableCount').set(n)
+    .then(()=>wref('leagues/'+league._id+'/matches').set(matches))
     .then(runAssignment)
     .then(function(){ hideOverlay(); toast('변경 완료 ✓','ok'); })
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
@@ -934,12 +1006,20 @@ function copyStandingsAsRoster(){
 function movePlayer(pid, fromG, toG){
   const dir = toG<fromG?'승급':'강등';
   if (!confirm(playerName(pid)+' 선수를 '+dir+'하시겠습니까?')) return;
-  db.ref('leagues/'+league._id+'/players/'+pid+'/group').set(toG)
+  wref('leagues/'+league._id+'/players/'+pid+'/group').set(toG)
     .then(function(){ toast(dir+' 완료 ✓','ok'); })
     .catch(function(e){ toast('오류: '+e.message,'err'); });
 }
 
-window.onload = loadHome;
+window.onload = function(){
+  const saved = localStorage.getItem(WS_STORAGE_KEY);
+  if (saved){
+    workspaceCode = saved;
+    document.getElementById('gate-code-input').value = saved;
+    showWorkspace();
+  }
+  // 저장된 코드가 없으면 page-gate가 기본으로 보여진 상태 그대로 대기
+};
 </script>
 </body>
 </html>
