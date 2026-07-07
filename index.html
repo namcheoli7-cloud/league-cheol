@@ -69,8 +69,10 @@ input:focus,select:focus{border-color:var(--blue);}
 .tc-class{font-size:10px;color:var(--text3);font-weight:500;}
 .tc-vs{font-size:12px;color:var(--text3);font-weight:700;}
 .tc-score{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;}
-.sc-box{width:60px;height:42px;text-align:center;font-size:18px;font-weight:800;border:1.5px solid var(--border);border-radius:6px;padding:0 2px;}
-.sc-box-sm{width:52px;height:34px;text-align:center;font-size:14px;font-weight:700;border:1.5px solid var(--border);border-radius:6px;padding:0 2px;}
+.sc-box{width:60px;height:42px;text-align:center;font-size:18px;font-weight:800;border:1.5px solid var(--border);border-radius:6px;padding:0 2px;-moz-appearance:textfield;}
+.sc-box-sm{width:52px;height:34px;text-align:center;font-size:14px;font-weight:700;border:1.5px solid var(--border);border-radius:6px;padding:0 2px;-moz-appearance:textfield;}
+.sc-box::-webkit-inner-spin-button,.sc-box::-webkit-outer-spin-button,
+.sc-box-sm::-webkit-inner-spin-button,.sc-box-sm::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
 .done-row{display:flex;align-items:center;gap:6px;padding:8px 4px;border-bottom:1px solid var(--border);font-size:13px;}
 .done-row .dn-team{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .p-item{cursor:default;}
@@ -129,6 +131,10 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
   <button class="tab" onclick="goTab('schedule',this)">🗓 경기배정</button>
   <button class="tab" onclick="goTab('standings',this)">🏆 순위</button>
 </div>
+<div class="tabs" id="student-tab-bar" style="display:none">
+  <button class="tab on" onclick="goTab('schedule',this)">📝 결과 제출</button>
+  <button class="tab" onclick="goTab('standings',this)">🏆 순위 확인</button>
+</div>
 
 <div class="content">
 
@@ -174,6 +180,7 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
         <div class="card-head">📋 선수 명단
           <button class="btn btn-gray btn-sm" style="margin-left:auto" onclick="openAddPlayerModal()">+ 선수 추가</button>
         </div>
+        <p class="hint" style="margin-bottom:12px;">💡 <b>선수 이름을 클릭</b>하면 이름 변경 · 그룹 변경 · 삭제를 할 수 있습니다. 왼쪽 체크박스는 결석 처리 전용입니다.</p>
         <div id="player-area"></div>
       </div>
       <div class="card">
@@ -192,7 +199,6 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
                 <option>2</option><option>3</option><option>4</option><option>5</option>
                 <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
               </select>
-              <button class="btn btn-gray btn-sm" onclick="toggleTeacherMode()" id="teacher-toggle-btn">🔒 교사모드</button>
             </span>
             <button class="btn btn-purple btn-sm" id="student-lock-btn" onclick="lockAsStudentStation()">📱 이 태블릿 학생입력 전용으로</button>
           </div>
@@ -210,12 +216,12 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
     <div id="panel-standings" class="panel">
       <div class="card">
         <div class="card-head">🏆 순위표
-          <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+          <div id="standings-copy-btns" style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-gray btn-sm" onclick="copyStandingsNamesOnly()">📋 이름만 복사</button>
             <button class="btn btn-purple btn-sm" onclick="copyStandingsAsRoster()">📋 명단형식 복사(새 리그용)</button>
           </div>
         </div>
-        <div class="lock-bar">
+        <div class="lock-bar" id="standings-lock-bar">
           <span>🔒</span>
           <input type="password" id="pw-input" placeholder="관리자 비밀번호" maxlength="20" style="width:130px">
           <button class="btn btn-gray btn-sm" onclick="tryUnlock()">확인</button>
@@ -333,6 +339,7 @@ let players = {};           // {id: {name,group,class,absent}}
 let matches = {};           // {id: {...}}
 let leaguesIndex = {};       // 홈 화면용 {id: meta}
 let isTeacher = false;
+let studentLocked = false;
 let adminUnlocked = false;
 let newTeamSize = 1;
 let mergeMode = 'mixed';
@@ -402,22 +409,37 @@ function isLockedForLeague(id){
   return localStorage.getItem(STUDENT_LOCK_KEY) === id;
 }
 function applyStudentLockUI(){
+  studentLocked = true;
   document.getElementById('tab-bar').style.display='none';
+  document.getElementById('student-tab-bar').style.display='flex';
+  document.querySelectorAll('#student-tab-bar .tab').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('#student-tab-bar .tab')[0].classList.add('on');
   document.getElementById('back-btn').style.display='none';
   document.getElementById('student-lock-badge').style.display='inline-flex';
   document.getElementById('student-lock-btn').style.display='none';
   document.getElementById('schedule-admin-controls').style.display='none';
   document.getElementById('absent-area').style.display='none';
+  document.getElementById('standings-copy-btns').style.display='none';
+  document.getElementById('standings-lock-bar').style.display='none';
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.getElementById('panel-schedule').classList.add('on');
 }
 function removeStudentLockUI(){
+  studentLocked = false;
   document.getElementById('student-lock-badge').style.display='none';
+  document.getElementById('student-tab-bar').style.display='none';
   document.getElementById('student-lock-btn').style.display='inline-flex';
   document.getElementById('schedule-admin-controls').style.display='flex';
   document.getElementById('absent-area').style.display='';
+  document.getElementById('standings-copy-btns').style.display='flex';
+  document.getElementById('standings-lock-bar').style.display='flex';
   document.getElementById('tab-bar').style.display='flex';
   document.getElementById('back-btn').style.display='inline-block';
+  document.querySelectorAll('#tab-bar .tab').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('#tab-bar .tab')[0].classList.add('on');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('panel-players').classList.add('on');
+  renderPlayers(); renderSchedule();
 }
 
 // ══════════════ 공통 유틸 ══════════════
@@ -580,12 +602,18 @@ function enterLeague(id){
   if (isLockedForLeague(id)){
     applyStudentLockUI();
   } else {
+    studentLocked = false;
     document.getElementById('tab-bar').style.display='flex';
     document.getElementById('back-btn').style.display='inline-block';
+    document.getElementById('student-tab-bar').style.display='none';
     document.getElementById('student-lock-badge').style.display='none';
     document.getElementById('student-lock-btn').style.display='inline-flex';
-    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
-    document.querySelectorAll('.tab')[0].classList.add('on');
+    document.getElementById('schedule-admin-controls').style.display='flex';
+    document.getElementById('absent-area').style.display='';
+    document.getElementById('standings-copy-btns').style.display='flex';
+    document.getElementById('standings-lock-bar').style.display='flex';
+    document.querySelectorAll('#tab-bar .tab').forEach(b=>b.classList.remove('on'));
+    document.querySelectorAll('#tab-bar .tab')[0].classList.add('on');
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
     document.getElementById('panel-players').classList.add('on');
   }
@@ -597,6 +625,7 @@ function goHome(){
   document.getElementById('page-league').classList.remove('on');
   document.getElementById('page-home').classList.add('on');
   document.getElementById('tab-bar').style.display='none';
+  document.getElementById('student-tab-bar').style.display='none';
   document.getElementById('back-btn').style.display='none';
   document.getElementById('hdr-tag').style.display='none';
 }
@@ -643,8 +672,8 @@ function renderPlayers(){
         const p = players[pid];
         html += `<div class="p-item${p.absent?' abs':''}">
           <input class="p-check" type="checkbox" ${p.absent?'checked':''} title="결석 처리" onclick="event.stopPropagation();toggleAbsentPlayer('${pid}')">
-          <div class="p-body" onclick="openEditPlayerModal('${pid}')">
-            <div class="p-name">${esc(p.name)}</div>
+          <div class="p-body" onclick="openEditPlayerModal('${pid}')" title="클릭하여 수정/삭제">
+            <div class="p-name">${esc(p.name)} <span style="color:var(--text3);font-weight:400;">✏️</span></div>
             ${league.isMerged?`<div class="p-class">${esc(p.class||'')}</div>`:''}
           </div>
         </div>`;
@@ -889,7 +918,7 @@ function renderSchedule(){
           </div>
           <button class="tc-save" onclick="submitScore('${mid}')">제출</button>
           ${m.referee?`<div class="tc-referee">🧑‍⚖️ 심판: <b>${esc(playerName(m.referee))}</b></div>`:''}
-          ${isTeacher?`<button class="tc-skip" onclick="skipMatch('${mid}')">🚫 이 경기 취소</button>`:''}
+          ${!studentLocked?`<button class="tc-skip" onclick="skipMatch('${mid}')">🚫 이 경기 취소</button>`:''}
         </div>
       </div>`;
     } else {
@@ -909,25 +938,30 @@ function renderSchedule(){
     <span class="qs-item">대기 <b style="color:var(--orange)">${waiting.length}</b></span>
     ${skipped.length?`<span class="qs-item">결석보류 <b style="color:var(--red)">${skipped.length}</b></span>`:''}`;
 
-  document.getElementById('done-card').style.display = done.length ? 'block' : 'none';
-  document.getElementById('done-count').textContent = '('+done.length+'경기)';
-  document.getElementById('done-list').innerHTML = done.slice().reverse().map(function(mid){
-    const m = matches[mid];
-    const aWin = m.scoreA>m.scoreB;
-    return `<div class="done-row">
-      <span style="color:var(--text3);width:30px;">#${m.matchNum}</span>
-      <span class="dn-team" style="text-align:right;${aWin?'font-weight:700;color:var(--green)':''}">${esc(teamLabel(m.teamA))}</span>
-      <input class="sc-box-sm" type="number" min="0" max="99" id="dsa-${mid}" value="${m.scoreA}">
-      <span>:</span>
-      <input class="sc-box-sm" type="number" min="0" max="99" id="dsb-${mid}" value="${m.scoreB}">
-      <span class="dn-team" style="${!aWin?'font-weight:700;color:var(--green)':''}">${esc(teamLabel(m.teamB))}</span>
-      <button class="btn btn-orange btn-sm" onclick="editDoneScore('${mid}')">수정</button>
-    </div>`;
-  }).join('');
+  if (studentLocked){
+    // 학생용 화면에는 완료된 경기 수정 목록을 노출하지 않음 (점수 수정은 교사 전용)
+    document.getElementById('done-card').style.display = 'none';
+  } else {
+    document.getElementById('done-card').style.display = done.length ? 'block' : 'none';
+    document.getElementById('done-count').textContent = '('+done.length+'경기)';
+    document.getElementById('done-list').innerHTML = done.slice().reverse().map(function(mid){
+      const m = matches[mid];
+      const aWin = m.scoreA>m.scoreB;
+      return `<div class="done-row">
+        <span style="color:var(--text3);width:30px;">#${m.matchNum}</span>
+        <span class="dn-team" style="text-align:right;${aWin?'font-weight:700;color:var(--green)':''}">${esc(teamLabel(m.teamA))}</span>
+        <input class="sc-box-sm" type="number" min="0" max="99" id="dsa-${mid}" value="${m.scoreA}">
+        <span>:</span>
+        <input class="sc-box-sm" type="number" min="0" max="99" id="dsb-${mid}" value="${m.scoreB}">
+        <span class="dn-team" style="${!aWin?'font-weight:700;color:var(--green)':''}">${esc(teamLabel(m.teamB))}</span>
+        <button class="btn btn-orange btn-sm" onclick="editDoneScore('${mid}')">수정</button>
+      </div>`;
+    }).join('');
+  }
 
-  // 결석자 관리 UI (교사모드에서만)
+  // 결석자 관리 UI (잠기지 않은 교사용 화면에서만)
   const absentArea = document.getElementById('absent-area');
-  if (isTeacher){
+  if (!studentLocked){
     const ids = Object.keys(players);
     absentArea.innerHTML = `<div style="font-size:12px;font-weight:700;margin-bottom:6px;">🚫 결석 처리</div><div class="p-grid">` +
       ids.map(pid=>{
@@ -985,13 +1019,8 @@ function doChangeTableCount(v){
     .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
 }
 function toggleTeacherMode(){
-  if (isTeacher){ isTeacher=false; document.getElementById('teacher-toggle-btn').textContent='🔒 교사모드'; renderSchedule(); return; }
-  const pw = prompt('교사 비밀번호를 입력하세요');
-  if (pw===null) return;
-  if (pw === (league.adminPassword||'1234')){
-    isTeacher=true; document.getElementById('teacher-toggle-btn').textContent='🔓 학생모드로';
-    renderSchedule(); toast('교사 모드 ✓','ok');
-  } else toast('비밀번호가 틀렸습니다','err');
+  /* 더 이상 사용하지 않음: 잠기지 않은 화면은 항상 전체 기능이 보이고,
+     "학생 입력 전용" 잠금이 걸린 화면만 제한된 기능을 보여줍니다. */
 }
 
 // ══════════════ 순위 탭 ══════════════
