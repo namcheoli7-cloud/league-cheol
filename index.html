@@ -109,6 +109,8 @@ table.rt{width:100%;border-collapse:collapse;}
 .lock-bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:var(--r);border:1px solid var(--border);flex-wrap:wrap;}
 .lock-st{font-size:12px;color:var(--text3);}
 .lock-st.ok{color:var(--green);font-weight:700;}
+.student-lock-badge{display:none;align-items:center;gap:6px;background:rgba(255,255,255,.2);padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;}
+.student-lock-badge button{background:rgba(255,255,255,.3);border:none;color:#fff;padding:3px 9px;border-radius:14px;font-size:11px;font-weight:700;cursor:pointer;}
 textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;font-family:inherit;resize:vertical;}
 </style>
 </head>
@@ -119,6 +121,7 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
   <h1>🏸🏓 리그전 통합 관리</h1>
   <span class="hdr-tag" id="ws-tag" style="display:none;cursor:pointer" onclick="confirmSwitchWorkspace()" title="클릭하면 다른 코드로 전환"></span>
   <span class="hdr-tag" id="hdr-tag" style="display:none"></span>
+  <span class="student-lock-badge" id="student-lock-badge">🔒 학생 입력 전용 <button onclick="unlockStudentStation()">잠금해제</button></span>
 </div>
 
 <div class="tabs" id="tab-bar" style="display:none">
@@ -183,12 +186,15 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
       <div class="card">
         <div class="card-head">🗓 테이블별 경기 현황
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <label style="font-size:12px;font-weight:700;">테이블 수</label>
-            <select id="table-count-sel" onchange="doChangeTableCount(this.value)">
-              <option>2</option><option>3</option><option>4</option><option>5</option>
-              <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
-            </select>
-            <button class="btn btn-gray btn-sm" onclick="toggleTeacherMode()" id="teacher-toggle-btn">🔒 교사모드</button>
+            <span id="schedule-admin-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <label style="font-size:12px;font-weight:700;">테이블 수</label>
+              <select id="table-count-sel" onchange="doChangeTableCount(this.value)">
+                <option>2</option><option>3</option><option>4</option><option>5</option>
+                <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+              </select>
+              <button class="btn btn-gray btn-sm" onclick="toggleTeacherMode()" id="teacher-toggle-btn">🔒 교사모드</button>
+            </span>
+            <button class="btn btn-purple btn-sm" id="student-lock-btn" onclick="lockAsStudentStation()">📱 이 태블릿 학생입력 전용으로</button>
           </div>
         </div>
         <div id="absent-area" style="margin-bottom:12px;"></div>
@@ -333,6 +339,7 @@ let mergeMode = 'mixed';
 let listenersAttached = false;
 let workspaceCode = null;
 const WS_STORAGE_KEY = 'league_workspace_code_v1';
+const STUDENT_LOCK_KEY = 'league_student_lock_v1';
 
 // ══════════════ 교사 코드(워크스페이스) ══════════════
 function sanitizeCode(raw){
@@ -355,8 +362,11 @@ function showWorkspace(){
   document.getElementById('ws-tag').style.display = 'inline-block';
   document.getElementById('ws-tag').textContent = '🔑 ' + workspaceCode;
   loadHome();
+  const lockedId = localStorage.getItem(STUDENT_LOCK_KEY);
+  if (lockedId){ enterLeague(lockedId); }
 }
 function confirmSwitchWorkspace(){
+  if (localStorage.getItem(STUDENT_LOCK_KEY)){ toast('학생 입력 전용 태블릿에서는 코드 전환이 제한됩니다. 잠금 해제 후 이용하세요','err'); return; }
   if (!confirm('다른 코드로 전환할까요? (지금 코드: '+workspaceCode+')\n전환해도 각 코드의 데이터는 그대로 보존됩니다.')) return;
   if (listenersAttached && league){ wref('leagues/'+league._id).off(); listenersAttached=false; }
   db.ref('workspaces/'+workspaceCode+'/leagues').off();
@@ -370,6 +380,44 @@ function confirmSwitchWorkspace(){
   document.getElementById('page-league').classList.remove('on');
   document.getElementById('gate-code-input').value='';
   document.getElementById('page-gate').classList.add('on');
+}
+
+// ══════════════ 학생 입력 전용 태블릿 잠금 ══════════════
+function lockAsStudentStation(){
+  if (!league || !league._id) return;
+  if (!confirm('이 태블릿을 『'+league.name+'』 학생 채점 전용 화면으로 고정할까요?\n\n고정하면 선수명단/순위 탭에 접근할 수 없고, "경기배정" 화면만 계속 보입니다.\n잠금을 풀려면 관리자 비밀번호가 필요합니다.\n\n(태블릿을 재시작해도 이 설정은 유지됩니다)')) return;
+  localStorage.setItem(STUDENT_LOCK_KEY, league._id);
+  applyStudentLockUI();
+  toast('학생 입력 전용으로 고정되었습니다 ✓','ok');
+}
+function unlockStudentStation(){
+  const pw = prompt('관리자 비밀번호를 입력하면 일반 화면으로 돌아갑니다');
+  if (pw===null) return;
+  if (pw !== (league?(league.adminPassword||'1234'):'1234')){ toast('비밀번호가 틀렸습니다','err'); return; }
+  localStorage.removeItem(STUDENT_LOCK_KEY);
+  removeStudentLockUI();
+  toast('잠금 해제 완료 ✓','ok');
+}
+function isLockedForLeague(id){
+  return localStorage.getItem(STUDENT_LOCK_KEY) === id;
+}
+function applyStudentLockUI(){
+  document.getElementById('tab-bar').style.display='none';
+  document.getElementById('back-btn').style.display='none';
+  document.getElementById('student-lock-badge').style.display='inline-flex';
+  document.getElementById('student-lock-btn').style.display='none';
+  document.getElementById('schedule-admin-controls').style.display='none';
+  document.getElementById('absent-area').style.display='none';
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('panel-schedule').classList.add('on');
+}
+function removeStudentLockUI(){
+  document.getElementById('student-lock-badge').style.display='none';
+  document.getElementById('student-lock-btn').style.display='inline-flex';
+  document.getElementById('schedule-admin-controls').style.display='flex';
+  document.getElementById('absent-area').style.display='';
+  document.getElementById('tab-bar').style.display='flex';
+  document.getElementById('back-btn').style.display='inline-block';
 }
 
 // ══════════════ 공통 유틸 ══════════════
@@ -529,12 +577,18 @@ function enterLeague(id){
   currentLeagueId = id; isTeacher=false; adminUnlocked=false;
   document.getElementById('page-home').classList.remove('on');
   document.getElementById('page-league').classList.add('on');
-  document.getElementById('tab-bar').style.display='flex';
-  document.getElementById('back-btn').style.display='inline-block';
-  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
-  document.querySelectorAll('.tab')[0].classList.add('on');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
-  document.getElementById('panel-players').classList.add('on');
+  if (isLockedForLeague(id)){
+    applyStudentLockUI();
+  } else {
+    document.getElementById('tab-bar').style.display='flex';
+    document.getElementById('back-btn').style.display='inline-block';
+    document.getElementById('student-lock-badge').style.display='none';
+    document.getElementById('student-lock-btn').style.display='inline-flex';
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+    document.querySelectorAll('.tab')[0].classList.add('on');
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+    document.getElementById('panel-players').classList.add('on');
+  }
   attachLeagueListeners(id);
 }
 function goHome(){
