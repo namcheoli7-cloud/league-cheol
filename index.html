@@ -155,6 +155,10 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
           <button class="btn btn-purple btn-sm" onclick="openMergeModal()">🔀 합반 만들기</button>
         </div>
       </div>
+      <div id="legacy-banner" style="display:none;background:#fff3bf;border:1px solid #ffe066;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#7c5700;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <span>📦 교사 코드 도입 이전에 만드신 리그전 데이터가 남아있습니다.</span>
+        <button class="btn btn-orange btn-sm" onclick="migrateLegacyData()">⬇️ 지금 코드로 가져오기</button>
+      </div>
       <div id="league-grid" class="cls-grid"><div class="empty">불러오는 중...</div></div>
     </div>
   </div>
@@ -385,6 +389,26 @@ function loadHome(){
     snap.forEach(function(c){ leaguesIndex[c.key] = c.val().meta || {}; });
     renderHome();
   });
+  checkLegacyData();
+}
+function checkLegacyData(){
+  db.ref('leagues').once('value').then(function(snap){
+    document.getElementById('legacy-banner').style.display = snap.exists() ? 'flex' : 'none';
+  }).catch(function(){ /* 조회 실패 시 조용히 무시 */ });
+}
+function migrateLegacyData(){
+  showOverlay('이전 데이터 확인 중...');
+  db.ref('leagues').once('value').then(function(snap){
+    const val = snap.val() || {};
+    const ids = Object.keys(val);
+    if (!ids.length){ hideOverlay(); toast('가져올 데이터가 없습니다','err'); document.getElementById('legacy-banner').style.display='none'; return; }
+    showOverlay('가져오는 중... ('+ids.length+'개)');
+    return wref('leagues').update(val).then(function(){
+      hideOverlay();
+      toast('가져오기 완료 ✓ 총 '+ids.length+'개 리그전','ok');
+      document.getElementById('legacy-banner').style.display='none';
+    });
+  }).catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
 }
 function renderHome(){
   const grid = document.getElementById('league-grid');
