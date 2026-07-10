@@ -57,7 +57,8 @@ input:focus,select:focus{border-color:var(--blue);}
 .p-class{font-size:10px;color:var(--text3);}
 .grp-block{margin-bottom:16px;}
 .grp-lbl{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--text3);}
-.table-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.table-grid{display:flex;flex-direction:column;gap:12px;}
+.table-grid-row{display:grid;gap:12px;}
 .table-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--rl);overflow:hidden;}
 .table-card.playing{border-color:#74c0fc;box-shadow:0 0 0 3px #dbe9f7;}
 .table-card.empty{border-style:dashed;opacity:.55;}
@@ -72,8 +73,11 @@ input:focus,select:focus{border-color:var(--blue);}
 @keyframes pulse-card{0%,100%{box-shadow:0 0 0 3px #ffc9c9;}50%{box-shadow:0 0 0 7px rgba(156,32,32,.25);}}
 .elapsed-legend{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;font-size:11px;color:var(--text3);margin:10px 0 4px;}
 .elapsed-legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle;}
-.tc-head{background:var(--blue);color:#fff;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;font-size:12px;}
+.tc-head{background:#74c0fc;color:#fff;padding:14px 14px 12px;position:relative;text-align:center;}
 .tc-head.empty-head{background:var(--surface3);color:var(--text3);}
+.tc-tablenum-big{font-size:26px;font-weight:900;line-height:1.1;}
+.tc-round-sm{font-size:11px;opacity:.85;margin-top:2px;font-weight:600;}
+.tc-group-badge{position:absolute;top:10px;right:12px;font-size:14px;font-weight:800;background:rgba(255,255,255,.28);padding:4px 11px;border-radius:8px;}
 .tc-body{padding:14px;}
 .tc-match{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;margin-bottom:12px;}
 .tc-names{font-weight:700;font-size:15px;line-height:1.5;text-align:center;}
@@ -140,10 +144,6 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
   <button class="tab on" onclick="goTab('players',this)">📋 선수명단</button>
   <button class="tab" onclick="goTab('schedule',this)">🗓 경기배정</button>
   <button class="tab" onclick="goTab('standings',this)">🏆 순위</button>
-</div>
-<div class="tabs" id="student-tab-bar" style="display:none">
-  <button class="tab on" onclick="goTab('schedule',this)">📝 결과 제출</button>
-  <button class="tab" onclick="goTab('standings',this)">🏆 순위 확인</button>
 </div>
 
 <div class="content">
@@ -227,6 +227,10 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
       <div class="card" id="done-card" style="display:none">
         <div class="card-head">✅ 완료된 경기 <span id="done-count"></span></div>
         <div id="done-list"></div>
+      </div>
+      <div class="card" id="student-standings-card" style="display:none">
+        <div class="card-head">🏆 현재 순위</div>
+        <div id="student-standings-area"></div>
       </div>
     </div>
 
@@ -452,9 +456,6 @@ function isLockedForLeague(id){
 function applyStudentLockUI(){
   studentLocked = true;
   document.getElementById('tab-bar').style.display='none';
-  document.getElementById('student-tab-bar').style.display='flex';
-  document.querySelectorAll('#student-tab-bar .tab').forEach(b=>b.classList.remove('on'));
-  document.querySelectorAll('#student-tab-bar .tab')[0].classList.add('on');
   document.getElementById('back-btn').style.display='none';
   document.getElementById('student-lock-badge').style.display='inline-flex';
   document.getElementById('student-lock-btn').style.display='none';
@@ -462,18 +463,19 @@ function applyStudentLockUI(){
   document.getElementById('absent-area').style.display='none';
   document.getElementById('standings-copy-btns').style.display='none';
   document.getElementById('standings-lock-bar').style.display='none';
+  document.getElementById('student-standings-card').style.display='block';
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.getElementById('panel-schedule').classList.add('on');
 }
 function removeStudentLockUI(){
   studentLocked = false;
   document.getElementById('student-lock-badge').style.display='none';
-  document.getElementById('student-tab-bar').style.display='none';
   document.getElementById('student-lock-btn').style.display='inline-flex';
   document.getElementById('schedule-admin-controls').style.display='flex';
   document.getElementById('absent-area').style.display='';
   document.getElementById('standings-copy-btns').style.display='flex';
   document.getElementById('standings-lock-bar').style.display='flex';
+  document.getElementById('student-standings-card').style.display='none';
   document.getElementById('tab-bar').style.display='flex';
   document.getElementById('back-btn').style.display='inline-block';
   document.querySelectorAll('#tab-bar .tab').forEach(b=>b.classList.remove('on'));
@@ -646,13 +648,13 @@ function enterLeague(id){
     studentLocked = false;
     document.getElementById('tab-bar').style.display='flex';
     document.getElementById('back-btn').style.display='inline-block';
-    document.getElementById('student-tab-bar').style.display='none';
     document.getElementById('student-lock-badge').style.display='none';
     document.getElementById('student-lock-btn').style.display='inline-flex';
     document.getElementById('schedule-admin-controls').style.display='flex';
     document.getElementById('absent-area').style.display='';
     document.getElementById('standings-copy-btns').style.display='flex';
     document.getElementById('standings-lock-bar').style.display='flex';
+    document.getElementById('student-standings-card').style.display='none';
     document.querySelectorAll('#tab-bar .tab').forEach(b=>b.classList.remove('on'));
     document.querySelectorAll('#tab-bar .tab')[0].classList.add('on');
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
@@ -667,7 +669,6 @@ function goHome(){
   document.getElementById('page-league').classList.remove('on');
   document.getElementById('page-home').classList.add('on');
   document.getElementById('tab-bar').style.display='none';
-  document.getElementById('student-tab-bar').style.display='none';
   document.getElementById('back-btn').style.display='none';
   document.getElementById('hdr-tag').style.display='none';
 }
@@ -939,14 +940,25 @@ function renderSchedule(){
   const tableCount = league.tableCount || 4;
   const mids = Object.keys(matches);
   const grid = document.getElementById('table-grid');
-  let html='';
-  for (let t=1;t<=tableCount;t++){
+
+  // 테이블 번호를 최대 5개씩 끊어서 줄 단위로 렌더링
+  const rows = [];
+  for (let start=1; start<=tableCount; start+=5){
+    rows.push([]);
+    for (let t=start; t<=Math.min(start+4, tableCount); t++) rows[rows.length-1].push(t);
+  }
+
+  function buildCardHtml(t){
     const mid = mids.find(id=>matches[id].status==='playing' && matches[id].tableNum===t);
     if (mid){
       const m = matches[mid];
       const gName = (league.groupNames||[])[m.group] || ('그룹'+(m.group+1));
-      html += `<div class="table-card playing" data-assigned="${m.assignedAt||''}">
-        <div class="tc-head"><b>🏓 테이블 ${t}</b><span>${esc(gName)} · R${m.round}</span></div>
+      return `<div class="table-card playing" data-assigned="${m.assignedAt||''}">
+        <div class="tc-head">
+          <span class="tc-group-badge">${esc(gName)}</span>
+          <div class="tc-tablenum-big">테이블 ${t}</div>
+          <div class="tc-round-sm">R${m.round}</div>
+        </div>
         <div class="tc-body">
           <div class="tc-match">
             <div><div class="tc-names">${esc(teamLabel(m.teamA))}</div><div class="tc-class">${teamClassTag(m.teamA)}</div></div>
@@ -962,11 +974,13 @@ function renderSchedule(){
           ${m.referee?`<div class="tc-referee">🧑‍⚖️ 심판: <b>${esc(playerName(m.referee))}</b></div>`:''}
         </div>
       </div>`;
-    } else {
-      html += `<div class="table-card empty"><div class="tc-head empty-head">테이블 ${t}</div><div class="tc-body" style="text-align:center;color:var(--text3);padding:24px 0;">대기 중...</div></div>`;
     }
+    return `<div class="table-card empty"><div class="tc-head empty-head"><div class="tc-tablenum-big">테이블 ${t}</div></div><div class="tc-body" style="text-align:center;color:var(--text3);padding:24px 0;">대기 중...</div></div>`;
   }
-  grid.innerHTML = html || '<div class="empty"><div class="ei">🗓</div>대진표를 먼저 생성하세요.</div>';
+
+  grid.innerHTML = tableCount>0
+    ? rows.map(rowTables=>`<div class="table-grid-row" style="grid-template-columns:repeat(${rowTables.length},1fr)">${rowTables.map(buildCardHtml).join('')}</div>`).join('')
+    : '<div class="empty"><div class="ei">🗓</div>대진표를 먼저 생성하세요.</div>';
   startElapsedTicker();
 
   const done = mids.filter(id=>matches[id].status==='done');
@@ -981,8 +995,9 @@ function renderSchedule(){
     ${skipped.length?`<span class="qs-item">결석보류 <b style="color:var(--red)">${skipped.length}</b></span>`:''}`;
 
   if (studentLocked){
-    // 학생용 화면에는 완료된 경기 수정 목록을 노출하지 않음 (점수 수정은 교사 전용)
+    // 학생용 화면에는 완료된 경기 점수 수정 목록을 노출하지 않음 (점수 수정은 교사 전용)
     document.getElementById('done-card').style.display = 'none';
+    renderStudentStandings();
   } else {
     document.getElementById('done-card').style.display = done.length ? 'block' : 'none';
     document.getElementById('done-count').textContent = '('+done.length+'경기)';
@@ -1001,15 +1016,22 @@ function renderSchedule(){
     }).join('');
   }
 
-  // 결석자 관리 UI (잠기지 않은 교사용 화면에서만)
+  // 결석자 관리 UI (잠기지 않은 교사용 화면에서만) - 수준별로 그룹지어 표시
   const absentArea = document.getElementById('absent-area');
   if (!studentLocked){
+    const groupNames = league.groupNames||['그룹1'];
     const ids = Object.keys(players);
-    absentArea.innerHTML = `<div style="font-size:12px;font-weight:700;margin-bottom:6px;">🚫 결석 처리</div><div class="p-grid">` +
-      ids.map(pid=>{
-        const p = players[pid];
-        return `<div class="p-item${p.absent?' abs':''}"><input class="p-check" type="checkbox" ${p.absent?'checked':''} onclick="toggleAbsentPlayer('${pid}')"><div class="p-body" style="cursor:default"><div class="p-name">${esc(p.name)}</div></div></div>`;
-      }).join('') + `</div>`;
+    let html = '<div style="font-size:12px;font-weight:700;margin-bottom:8px;">🚫 결석 처리</div>';
+    groupNames.forEach(function(gName, gi){
+      const gp = ids.filter(pid=>players[pid].group===gi);
+      if (!gp.length) return;
+      html += `<div class="grp-block"><div class="grp-lbl"><span class="gb g${gi%5}">${esc(gName)}</span><span>${gp.length}명</span></div><div class="p-grid">` +
+        gp.map(pid=>{
+          const p = players[pid];
+          return `<div class="p-item${p.absent?' abs':''}"><input class="p-check" type="checkbox" ${p.absent?'checked':''} onclick="toggleAbsentPlayer('${pid}')"><div class="p-body" style="cursor:default"><div class="p-name">${esc(p.name)}</div></div></div>`;
+        }).join('') + `</div></div>`;
+    });
+    absentArea.innerHTML = html;
   } else {
     absentArea.innerHTML='';
   }
@@ -1077,22 +1099,21 @@ function computeStandings(){
   });
   return byGroup;
 }
-function renderStandings(){
+function buildStandingsHtml(showActions){
   const byGroup = computeStandings();
   const groupNames = league.groupNames||['그룹1'];
   const groups = Object.keys(byGroup).map(Number).sort((a,b)=>a-b);
-  const el = document.getElementById('standings-area');
-  if (!groups.length){ el.innerHTML = '<div class="empty" style="padding:24px">아직 완료된 경기가 없습니다.</div>'; return; }
+  if (!groups.length){ return '<div class="empty" style="padding:24px">아직 완료된 경기가 없습니다.</div>'; }
   let html='';
   groups.forEach(function(g){
     const list = byGroup[g];
     html += `<div class="gsep"><span class="gb g${g%5}">${esc(groupNames[g]||'그룹'+(g+1))}</span><span style="font-size:12px;color:var(--text3)">${list.length}명</span><div class="gsep-line"></div></div>
-    <div class="sw"><table class="rt"><thead><tr><th>순위</th><th>이름</th>${league.isMerged?'<th>반</th>':''}<th>승</th><th>패</th><th>득실</th>${adminUnlocked?'<th>승강</th>':''}</tr></thead><tbody>`;
+    <div class="sw"><table class="rt"><thead><tr><th>순위</th><th>이름</th>${league.isMerged?'<th>반</th>':''}<th>승</th><th>패</th><th>득실</th>${showActions?'<th>승강</th>':''}</tr></thead><tbody>`;
     list.forEach(function(p,i){
       const diff = p.pf-p.pa;
       html += `<tr><td>${i+1}</td><td><b>${esc(p.name)}</b></td>${league.isMerged?`<td style="font-size:11px;color:var(--text3)">${esc(p.class||'')}</td>`:''}
         <td class="win">${p.wins}</td><td class="loss">${p.losses}</td><td>${diff>0?'+':''}${diff}</td>
-        ${adminUnlocked?`<td>
+        ${showActions?`<td>
           ${g>0?`<button class="up-btn" onclick="movePlayer('${p.pid}',${g},${g-1})">▲</button>`:''}
           ${g<groupNames.length-1?`<button class="dn-btn" onclick="movePlayer('${p.pid}',${g},${g+1})">▼</button>`:''}
         </td>`:''}
@@ -1100,7 +1121,14 @@ function renderStandings(){
     });
     html += '</tbody></table></div>';
   });
-  el.innerHTML = html;
+  return html;
+}
+function renderStandings(){
+  document.getElementById('standings-area').innerHTML = buildStandingsHtml(adminUnlocked);
+}
+function renderStudentStandings(){
+  const el = document.getElementById('student-standings-area');
+  if (el) el.innerHTML = buildStandingsHtml(false);
 }
 function tryUnlock(){
   const pw = document.getElementById('pw-input').value;
