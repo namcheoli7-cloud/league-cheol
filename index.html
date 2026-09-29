@@ -227,6 +227,7 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
     <div class="card">
       <div class="card-head">📚 진행중인 리그전
         <div style="margin-left:auto;display:flex;gap:8px;">
+          <button class="btn btn-gray btn-sm" onclick="importBackup(true)">📂 백업 가져오기</button>
           <button class="btn btn-blue btn-sm" onclick="openCreateModal()">+ 새 리그전</button>
           <button class="btn btn-purple btn-sm" onclick="openMergeModal()">🔀 합반 만들기</button>
         </div>
@@ -400,7 +401,7 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-functions-compat.js"></script>
 <script>
-// ★★★ 본인의 Firebase 프로젝트 설정으로 교체하세요 ★★★
+// 기존 리그 데이터에 연결하는 Firebase 프로젝트 설정
 const firebaseConfig = {
   apiKey: "AIzaSyB0lcNnQAMUXn3BaXsi6NiKDBq8guSn6Bw",
   authDomain: "league-cheol.firebaseapp.com",
@@ -507,6 +508,7 @@ function unlockStudentStation(){
   if (pw===null) return;
   if (pw !== (league?(league.adminPassword||'1234'):'1234')){ toast('비밀번호가 틀렸습니다','err'); return; }
   localStorage.removeItem(STUDENT_LOCK_KEY);
+  authorizeTeacher(league._id);
   removeStudentLockUI();
   toast('잠금 해제 완료 ✓','ok');
 }
@@ -555,14 +557,7 @@ function uid(){ return db.ref().push().key; }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ══════════════ 홈 화면 ══════════════
-function loadHome(){
-  document.getElementById('league-grid').innerHTML = '<div class="empty">불러오는 중...</div>';
-  wref('leagues').on('value', function(snap){
-    leaguesIndex = {};
-    snap.forEach(function(c){ leaguesIndex[c.key] = c.val().meta || {}; });
-    renderHome();
-  });
-}
+
 function renderHome(){
   const grid = document.getElementById('league-grid');
   const ids = Object.keys(leaguesIndex);
@@ -580,17 +575,7 @@ function renderHome(){
 }
 
 // ══════════════ 리그 생성 ══════════════
-function deleteLeague(id, name){
-  const m = leaguesIndex[id]||{};
-  const pw = prompt('『'+name+'』을(를) 완전히 삭제합니다.\n관리자 비밀번호를 입력하세요 (삭제 후 복구 불가):');
-  if (pw===null) return;
-  if (pw !== (m.adminPassword||'1234')){ toast('비밀번호가 틀렸습니다','err'); return; }
-  if (!confirm('정말로 『'+name+'』을(를) 삭제할까요?\n선수 명단·경기 기록이 모두 사라지며 되돌릴 수 없습니다.')) return;
-  showOverlay('삭제 중...');
-  wref('leagues/'+id).remove()
-    .then(function(){ hideOverlay(); toast('삭제 완료 ✓','ok'); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
+
 function openCreateModal(){
   newSetConfig = [{type:'double'},{type:'single'},{type:'single'}];
   setNewFormat('single');
@@ -720,7 +705,19 @@ function doCreateMerge(){
 }
 
 // ══════════════ 리그 진입 ══════════════
-function enterLeague(id){
+async function enterLeague(id){
+  if(!SECURE_MODE&&!isLockedForLeague(id)&&!hasTeacherSession(id)){
+    const ws=workspaceCode;
+    try{
+      const meta=(await wref('leagues/'+id+'/meta').once('value')).val();
+      if(workspaceCode!==ws)return;
+      if(!meta){toast('리그를 찾을 수 없습니다','err');return;}
+      const pw=prompt('교사 관리 화면: 관리자 비밀번호를 입력하세요.\n학생 입력 화면: 취소를 누르세요.');
+      if(pw===null)localStorage.setItem(STUDENT_LOCK_KEY,id);
+      else if(pw===(meta.adminPassword||'1234'))authorizeTeacher(id);
+      else {toast('비밀번호가 틀렸습니다','err');return;}
+    }catch(e){toast('리그를 열 수 없습니다: '+e.message,'err');return;}
+  }
   currentLeagueId = id; isTeacher=false; adminUnlocked=false;
   document.getElementById('page-home').classList.remove('on');
   document.getElementById('page-league').classList.add('on');
@@ -762,34 +759,6 @@ function goTab(id, btn){
   if (id==='standings') renderStandings();
 }
 
-function attachLeagueListeners(id){
-  if (listenersAttached && league) wref('leagues/'+league._id).off();
-  wref('leagues/'+id).on('value', function(snap){
-    const val = snap.val();
-    if (!val){ toast('리그 데이터를 찾을 수 없습니다','err'); return; }
-    league = val.meta || {}; league._id = id;
-    players = val.players || {};
-    matches = val.matches || {};
-    document.getElementById('hdr-tag').style.display='inline-block';
-    document.getElementById('hdr-tag').textContent = league.name + (league.format==='team' ? ' · 단체전' : (league.teamSize===2?' · 복식':' · 단식'));
-    document.getElementById('table-count-sel').value = league.tableCount || 4;
-    const isTeamFmt = league.format==='team';
-    if (!studentLocked){
-      document.getElementById('schedule-admin-controls').style.display = isTeamFmt ? 'none' : 'flex';
-    }
-    document.getElementById('absent-area').style.display = isTeamFmt ? 'none' : '';
-    const legendEl = document.querySelector('.elapsed-legend');
-    if (legendEl) legendEl.style.display = isTeamFmt ? 'none' : 'flex';
-    const lockBar = document.getElementById('standings-lock-bar');
-    if (lockBar) lockBar.style.display = isTeamFmt ? 'none' : 'flex';
-    const copyBtns = document.getElementById('standings-copy-btns');
-    if (copyBtns) copyBtns.style.display = isTeamFmt ? 'none' : 'flex';
-    renderPlayers();
-    renderSchedule();
-    if (document.getElementById('panel-standings').classList.contains('on')) renderStandings();
-  });
-  listenersAttached = true;
-}
 
 // ══════════════ 선수명단 탭 ══════════════
 function renderPlayers(){
@@ -831,23 +800,12 @@ function renderPlayers(){
     genArea.innerHTML = `<button class="btn btn-green" onclick="generateSchedule()">📅 대진표 생성 및 시작</button>`;
   }
 }
-function toggleAbsentPlayer(pid){
-  wref('leagues/'+league._id+'/players/'+pid+'/absent').set(!players[pid].absent)
-    .then(function(){ applyAbsentLogic(); });
-}
+
 function openAddPlayerModal(){
   const sel = document.getElementById('ap-group');
   sel.innerHTML = (league.groupNames||[]).map((g,i)=>`<option value="${i}">${esc(g)}</option>`).join('');
   document.getElementById('ap-name').value='';
   openModal('addplayer-modal-bg');
-}
-function doAddPlayer(){
-  const name = document.getElementById('ap-name').value.trim();
-  const group = parseInt(document.getElementById('ap-group').value,10)||0;
-  if (!name){ toast('이름을 입력하세요','err'); return; }
-  const pid = uid();
-  wref('leagues/'+league._id+'/players/'+pid).set({ name:name, group:group, class:league.isMerged?'':league.name, absent:false })
-    .then(function(){ closeModal('addplayer-modal-bg'); toast('추가 완료 ✓','ok'); });
 }
 
 let editingPid = null;
@@ -860,142 +818,7 @@ function openEditPlayerModal(pid){
   sel.innerHTML = (league.groupNames||[]).map((g,i)=>`<option value="${i}" ${i===p.group?'selected':''}>${esc(g)}</option>`).join('');
   openModal('editplayer-modal-bg');
 }
-function doSavePlayerEdit(){
-  const name = document.getElementById('ep-name').value.trim();
-  const group = parseInt(document.getElementById('ep-group').value,10)||0;
-  if (!name){ toast('이름을 입력하세요','err'); return; }
-  wref('leagues/'+league._id+'/players/'+editingPid).update({ name:name, group:group })
-    .then(function(){ closeModal('editplayer-modal-bg'); toast('수정 완료 ✓','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
-}
-function doDeletePlayerConfirm(){
-  const p = players[editingPid];
-  if (!p) return;
-  if (!confirm(p.name+' 선수를 명단에서 삭제할까요?')) return;
-  wref('leagues/'+league._id+'/players/'+editingPid).remove()
-    .then(function(){ closeModal('editplayer-modal-bg'); toast('삭제 완료 ✓','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
-}
 
-// ══════════════ 대진 생성 엔진 (단식/복식 통합) ══════════════
-function buildRounds(playerIds, teamSize){
-  if (teamSize===2) return buildDoublesRoundsFair(playerIds);
-  let arr = playerIds.slice();
-  if (arr.length % 2 !== 0) arr.push(null); // BYE
-  const total = arr.length, numRounds = total-1;
-  const out = [];
-  for (let round=0; round<numRounds; round++){
-    const pairs = [];
-    for (let i=0;i<total/2;i++){
-      const a=arr[i], b=arr[total-1-i];
-      if (a!==null && b!==null) pairs.push([a,b]);
-    }
-    pairs.forEach(p=>out.push({round:round+1, teamA:[p[0]], teamB:[p[1]]}));
-    const fixed=arr[0], rest=arr.slice(1); rest.unshift(rest.pop()); arr=[fixed].concat(rest);
-  }
-  return out;
-}
-// 복식 대진 생성: 매치 4인 1조 구성상 인원수가 4의 배수/배수+1이 아니면 완전히 공정할 수 없지만,
-// "가장 적게 뛴 사람부터 우선 배정"하는 그리디 방식으로 전원 경기 수 차이를 최대 1경기로 보장합니다.
-function buildDoublesRoundsFair(playerIds){
-  const n = playerIds.length;
-  const matchesPerRound = Math.floor(n/4);
-  if (matchesPerRound < 1) return [];
-  const targetAvgGames = n-1; // 단식과 비슷한 수준의 경기수를 목표로 라운드 수 산정
-  const numRounds = Math.ceil((targetAvgGames*n)/(matchesPerRound*4));
-  const gamesPlayed = {}, sitStreak = {};
-  playerIds.forEach(function(id){ gamesPlayed[id]=0; sitStreak[id]=0; });
-  const out = [];
-  for (let round=1; round<=numRounds; round++){
-    const playCount = matchesPerRound*4;
-    // 지금까지 적게 뛴 사람 우선, 동률이면 오래 쉰 사람 우선으로 이번 라운드 출전자를 정함
-    const sorted = playerIds.slice().sort(function(a,b){
-      if (gamesPlayed[a]!==gamesPlayed[b]) return gamesPlayed[a]-gamesPlayed[b];
-      if (sitStreak[a]!==sitStreak[b]) return sitStreak[b]-sitStreak[a];
-      return Math.random()-0.5;
-    });
-    const playing = sorted.slice(0, playCount);
-    const sitting = sorted.slice(playCount);
-    // 같은 우선순위 그룹 내에서 팀 편성이 매번 똑같지 않도록 살짝 섞음
-    for (let i=playing.length-1; i>0; i--){
-      const j = Math.floor(Math.random()*(i+1));
-      const tmp=playing[i]; playing[i]=playing[j]; playing[j]=tmp;
-    }
-    for (let m=0; m<matchesPerRound; m++){
-      const four = playing.slice(m*4, m*4+4);
-      out.push({ round: round, teamA:[four[0],four[1]], teamB:[four[2],four[3]] });
-    }
-    playing.forEach(function(id){ gamesPlayed[id]++; sitStreak[id]=0; });
-    sitting.forEach(function(id){ sitStreak[id]++; });
-  }
-  return out;
-}
-function generateSchedule(){
-  if (league.format==='team'){ generateTeamSchedule(); return; }
-  if (Object.keys(players).length < (league.teamSize===2?4:2)){
-    toast('선수가 부족합니다 (복식은 그룹당 4명, 단식은 2명 이상 필요)','err'); return;
-  }
-  showOverlay('대진표 생성 중...');
-  const groupNames = league.groupNames||['그룹1'];
-  const allIds = Object.keys(players);
-  let matchNum = 1;
-  const newMatches = {};
-  groupNames.forEach(function(gName, gi){
-    let gp = allIds.filter(pid=>players[pid].group===gi && !players[pid].absent);
-    const minNeeded = league.teamSize===2 ? 4 : 2;
-    if (gp.length < minNeeded) return;
-    const rounds = buildRounds(gp, league.teamSize);
-    rounds.forEach(function(m){
-      const mid = uid();
-      newMatches[mid] = {
-        matchNum: matchNum++, round:m.round, group:gi,
-        teamA:m.teamA, teamB:m.teamB, scoreA:null, scoreB:null,
-        status:'waiting', tableNum:null, referee:null
-      };
-    });
-  });
-  wref('leagues/'+league._id).update({ matches: newMatches, 'meta/tableCount': league.tableCount||4 })
-    .then(function(){
-      matches = newMatches;
-      return runAssignment();
-    })
-    .then(function(){ hideOverlay(); toast('대진표 생성 완료 ✓','ok'); document.querySelectorAll('.tab')[1].click(); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
-function confirmRegenerate(){
-  if (!confirm('기존 경기 결과가 모두 삭제됩니다. 대진표를 재생성할까요?')) return;
-  generateSchedule();
-}
-
-// ══════════════ 단체전(조 대항) 대진 생성 ══════════════
-function generateTeamSchedule(){
-  const teamNames = league.groupNames || [];
-  if (teamNames.length < 2){ toast('단체전은 조가 2개 이상 필요합니다','err'); return; }
-  const setConfig = (league.setConfig && league.setConfig.length) ? league.setConfig : [{type:'single'}];
-  showOverlay('단체전 대진표 생성 중...');
-  const newMatches = {};
-  let matchNum = 1;
-  for (let i=0; i<teamNames.length; i++){
-    for (let j=i+1; j<teamNames.length; j++){
-      const mid = uid();
-      const sets = {};
-      setConfig.forEach(function(sc, si){
-        sets[si] = {
-          type: sc.type==='double'?'double':'single', playersA:{}, playersB:{},
-          games: {
-            0: { scoreA:null, scoreB:null, done:false },
-            1: { scoreA:null, scoreB:null, done:false },
-            2: { scoreA:null, scoreB:null, done:false }
-          }
-        };
-      });
-      newMatches[mid] = { matchNum: matchNum++, format:'team', teamAIdx:i, teamBIdx:j, status:'waiting', sets: sets };
-    }
-  }
-  wref('leagues/'+league._id+'/matches').set(newMatches)
-    .then(function(){ matches = newMatches; hideOverlay(); toast('단체전 대진표 생성 완료 ✓','ok'); document.querySelectorAll('.tab')[1].click(); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
 
 function teamName(idx){ return (league.groupNames||[])[idx] || ('조'+(idx+1)); }
 
@@ -1007,22 +830,7 @@ function gameWinner(g){
   return null;
 }
 // 한 세트(3판 2선승)의 결과: 게임 두 개를 먼저 본 뒤, 1:1이면 3게임째를 반영
-function setResult(s){
-  const games = s.games || {};
-  const g0 = games[0] || {}, g1 = games[1] || {}, g2 = games[2] || {};
-  const w0 = gameWinner(g0), w1 = gameWinner(g1);
-  let gA=0, gB=0;
-  if (w0==='A') gA++; else if (w0==='B') gB++;
-  if (w1==='A') gA++; else if (w1==='B') gB++;
-  let done = gA>=2 || gB>=2;
-  const needGame3 = !done && !!g0.done && !!g1.done;
-  if (needGame3){
-    const w2 = gameWinner(g2);
-    if (w2==='A') gA++; else if (w2==='B') gB++;
-    done = gA>=2 || gB>=2;
-  }
-  return { gA:gA, gB:gB, done:done, winner: gA>=2?'A':(gB>=2?'B':null), needGame3:needGame3 };
-}
+
 function tieSetTally(m){
   let wA=0, wB=0;
   Object.keys(m.sets||{}).forEach(function(k){
@@ -1083,7 +891,7 @@ function buildSetHtml(mid, si, s, teamAIdx, teamBIdx){
     let out = '';
     for (let k=0; k<slots; k++){
       const pid = map[k] || '';
-      out += `<select ${sr.done||studentLocked?'disabled':''} onchange="setTiePlayer('${mid}','${si}','${side}',${k},this.value)">${teamPlayerSelectOptions(teamIdx, pid)}</select>`;
+      out += `<select ${sr.done||studentLocked||Object.values(games).some(g=>g.done)?'disabled':''} onchange="setTiePlayer('${mid}','${si}','${side}',${k},this.value)">${teamPlayerSelectOptions(teamIdx, pid)}</select>`;
     }
     return out;
   }
@@ -1108,12 +916,7 @@ function renderTeamSchedule(){
   const doneCard = document.getElementById('done-card');
   if (doneCard) doneCard.style.display='none';
 
-  // 드롭다운/입력칸을 조작하는 중이면 다시 그리지 않고 대기 (선택이 사라지는 문제 방지)
-  const active = document.activeElement;
-  if (false){
-    teamScheduleRenderPending = true;
-    return;
-  }
+  // 입력 초안은 preserveRender에서 유지합니다.
   teamScheduleRenderPending = false;
 
   const mids = Object.keys(matches).sort((a,b)=>(matches[a].matchNum||0)-(matches[b].matchNum||0));
@@ -1202,145 +1005,14 @@ function buildDoneRowHtml(mid, m){
     <button class="btn btn-gray btn-sm" onclick="startTeamTie('${mid}')">🔄 다시 진행</button>
   </div>`;
 }
-function startTeamTie(mid){
-  wref('leagues/'+league._id+'/matches/'+mid+'/status').set('playing')
-    .then(function(){ toast('진행중으로 전환 ✓','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
-}
-function pauseTeamTie(mid){
-  wref('leagues/'+league._id+'/matches/'+mid+'/status').set('waiting')
-    .then(function(){ toast('대기중으로 전환되었습니다','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
-}
-function finishTeamTie(mid){
-  if (!confirm('지금까지 진행된 세트 결과로 이 매치를 종료할까요?\n(순위에 승/패/무로 반영됩니다)')) return;
-  wref('leagues/'+league._id+'/matches/'+mid+'/status').set('done')
-    .then(function(){ toast('매치 종료 · 결과 확정 ✓','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
-}
 
-function setTiePlayer(mid, si, side, slot, pid){
-  const path = 'leagues/'+league._id+'/matches/'+mid+'/sets/'+si+'/players'+side+'/'+slot;
-  const p = pid ? wref(path).set(pid) : wref(path).remove();
-  p.catch(function(e){ toast('오류: '+e.message,'err'); });
-}
-function submitTeamGame(mid, si, gi){
-  const sa = document.getElementById('tg-'+mid+'-'+si+'-'+gi+'-a').value.trim();
-  const sb = document.getElementById('tg-'+mid+'-'+si+'-'+gi+'-b').value.trim();
-  if (sa===''||sb===''){ toast('점수를 입력하세요','err'); return; }
-  if (Number(sa)===Number(sb)){ toast('두 점수가 같을 수 없습니다','err'); return; }
-  const scoreA = Number(sa), scoreB = Number(sb);
-  showOverlay('저장 중...');
-  const updates = {};
-  updates['matches/'+mid+'/sets/'+si+'/games/'+gi+'/scoreA'] = scoreA;
-  updates['matches/'+mid+'/sets/'+si+'/games/'+gi+'/scoreB'] = scoreB;
-  updates['matches/'+mid+'/sets/'+si+'/games/'+gi+'/done'] = true;
-  // 이 게임 결과로 모든 세트가 끝나는지 로컬에서 미리 판정해 status를 자동으로 '완료'로 갱신
-  const m = matches[mid];
-  if (m){
-    const mCopy = JSON.parse(JSON.stringify(m));
-    if (!mCopy.sets[si].games) mCopy.sets[si].games = {};
-    mCopy.sets[si].games[gi] = { scoreA:scoreA, scoreB:scoreB, done:true };
-    if (allSetsComplete(mCopy)) updates['matches/'+mid+'/status'] = 'done';
-  }
-  wref('leagues/'+league._id).update(updates)
-    .then(function(){ hideOverlay(); toast('게임 결과 저장 ✓','ok'); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
-function reopenTeamGame(mid, si, gi){
-  const updates = {};
-  updates['matches/'+mid+'/sets/'+si+'/games/'+gi+'/done'] = false;
-  const m = matches[mid];
-  if (m && getTieStatus(m)==='done') updates['matches/'+mid+'/status'] = 'playing';
-  wref('leagues/'+league._id).update(updates)
-    .then(function(){ toast('다시 입력할 수 있습니다','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
-}
+
+
+
+
 
 // ══════════════ 테이블/심판 자동 배정 ══════════════
-function runAssignment(){
-  const tableCount = league.tableCount || 4;
-  const mids = Object.keys(matches);
 
-  // 결석자 반영: 결석 포함 경기 skip, 해제된 결석 waiting 복귀
-  const absentSet = {};
-  Object.keys(players).forEach(pid=>{ if (players[pid].absent) absentSet[pid]=true; });
-  mids.forEach(function(mid){
-    const m = matches[mid];
-    if (m.status==='done') return;
-    const involved = m.teamA.concat(m.teamB);
-    const hasAbsent = involved.some(pid=>absentSet[pid]);
-    if (hasAbsent){
-      if (m.status!=='skipped'){ m.status='skipped'; m.tableNum=null; m.referee=null; }
-    } else if (m.status==='skipped'){
-      m.status='waiting';
-    }
-  });
-
-  // 테이블 배정
-  const busy = {};
-  const playingByGroup = {};
-  mids.forEach(function(mid){
-    const m = matches[mid];
-    if (m.status==='playing'){
-      m.teamA.concat(m.teamB).forEach(pid=>busy[pid]=true);
-      playingByGroup[m.group]=(playingByGroup[m.group]||0)+1;
-    }
-  });
-  for (let t=1;t<=tableCount;t++){
-    const inUse = mids.some(mid=>matches[mid].status==='playing' && matches[mid].tableNum===t);
-    if (inUse) continue;
-    const waiting = mids.filter(mid=>matches[mid].status==='waiting')
-      .sort((a,b)=>{
-        const ga=matches[a].group, gb=matches[b].group;
-        const pa=playingByGroup[ga]||0, pb=playingByGroup[gb]||0;
-        if (pa!==pb) return pa-pb;
-        return matches[a].matchNum-matches[b].matchNum;
-      });
-    for (const mid of waiting){
-      const m = matches[mid];
-      const involved = m.teamA.concat(m.teamB);
-      if (involved.some(pid=>busy[pid])) continue;
-      m.status='playing'; m.tableNum=t; m.assignedAt=Date.now();
-      involved.forEach(pid=>busy[pid]=true);
-      playingByGroup[m.group]=(playingByGroup[m.group]||0)+1;
-      break;
-    }
-  }
-
-  // 심판 배정
-  if (league.refereeMode){
-    const refCount = {};
-    mids.forEach(mid=>{ const r=matches[mid].referee; if (r) refCount[r]=(refCount[r]||0)+1; });
-    const busy2 = {};
-    mids.forEach(mid=>{ const m=matches[mid]; if (m.status==='playing'){ m.teamA.concat(m.teamB).forEach(p=>busy2[p]=true); if (m.referee) busy2[m.referee]=true; } });
-    mids.forEach(function(mid){
-      const m = matches[mid];
-      if (m.status!=='playing' || m.referee) return;
-      const candidates = [];
-      mids.forEach(function(oid){
-        const o = matches[oid];
-        if (o.group!==m.group) return;
-        if (o.status!=='waiting' && o.status!=='skipped') return;
-        o.teamA.concat(o.teamB).forEach(function(pid){
-          if (!busy2[pid] && candidates.indexOf(pid)===-1 && !absentSet[pid]) candidates.push(pid);
-        });
-      });
-      candidates.sort((a,b)=>(refCount[a]||0)-(refCount[b]||0));
-      if (candidates.length){
-        m.referee = candidates[0];
-        busy2[candidates[0]] = true;
-        refCount[candidates[0]] = (refCount[candidates[0]]||0)+1;
-      }
-    });
-  }
-
-  return wref('leagues/'+league._id+'/matches').set(matches);
-}
-function applyAbsentLogic(){
-  showOverlay('결석 반영 중...');
-  runAssignment().then(function(){ hideOverlay(); toast('결석 반영 완료 ✓','ok'); }).catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
 
 // ══════════════ 경기배정 탭 ══════════════
 function playerName(pid){ return pid && players[pid] ? players[pid].name : '?'; }
@@ -1460,42 +1132,9 @@ function renderSchedule(){
     absentArea.innerHTML='';
   }
 }
-function submitScore(mid){
-  const sa = document.getElementById('sa-'+mid).value.trim();
-  const sb = document.getElementById('sb-'+mid).value.trim();
-  if (sa===''||sb===''){ toast('점수를 입력하세요','err'); return; }
-  const m = matches[mid];
-  m.scoreA = Number(sa); m.scoreB = Number(sb);
-  m.status = 'done'; m.tableNum = null; m.referee = null;
-  showOverlay('저장 중...');
-  wref('leagues/'+league._id+'/matches/'+mid).set(m)
-    .then(runAssignment)
-    .then(function(){ hideOverlay(); toast('저장 완료 ✓','ok'); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
-function editDoneScore(mid){
-  const sa = document.getElementById('dsa-'+mid).value.trim();
-  const sb = document.getElementById('dsb-'+mid).value.trim();
-  if (sa===''||sb===''){ toast('점수를 입력하세요','err'); return; }
-  showOverlay('수정 중...');
-  wref('leagues/'+league._id+'/matches/'+mid).update({ scoreA:Number(sa), scoreB:Number(sb) })
-    .then(function(){ hideOverlay(); toast('점수 수정 완료 ✓','ok'); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
-function doChangeTableCount(v){
-  const n = Number(v);
-  const mids = Object.keys(matches);
-  mids.forEach(function(mid){
-    const m = matches[mid];
-    if (m.status==='playing' && m.tableNum>n){ m.status='waiting'; m.tableNum=null; m.referee=null; }
-  });
-  showOverlay('테이블 재배정 중...');
-  wref('leagues/'+league._id+'/meta/tableCount').set(n)
-    .then(()=>wref('leagues/'+league._id+'/matches').set(matches))
-    .then(runAssignment)
-    .then(function(){ hideOverlay(); toast('변경 완료 ✓','ok'); })
-    .catch(function(e){ hideOverlay(); toast('오류: '+e.message,'err'); });
-}
+
+
+
 function toggleTeacherMode(){
   /* 더 이상 사용하지 않음: 잠기지 않은 화면은 항상 전체 기능이 보이고,
      "학생 입력 전용" 잠금이 걸린 화면만 제한된 기능을 보여줍니다. */
@@ -1608,6 +1247,7 @@ function fallbackCopy(text,onOk){
   document.body.removeChild(ta);
 }
 function copyStandingsNamesOnly(){
+  if(league.format==='team'){copyToClipboard(computeTeamStandings().map(t=>t.name).join('\n'),()=>toast('조 순위 복사 완료 ✓','ok'));return;}
   const byGroup = computeStandings();
   const groups = Object.keys(byGroup).map(Number).sort((a,b)=>a-b);
   if (!groups.length){ toast('복사할 순위 데이터가 없습니다','err'); return; }
@@ -1616,6 +1256,7 @@ function copyStandingsNamesOnly(){
   copyToClipboard(lines.join('\n'), function(){ toast('이름 목록 복사 완료 ✓','ok'); });
 }
 function copyStandingsAsRoster(){
+  if(league.format==='team'){const order=computeTeamStandings();const lines=order.flatMap((t,i)=>Object.values(players).filter(p=>p.group===t.idx).map(p=>p.name+','+(i+1)));copyToClipboard(lines.join('\n'),()=>toast('조 순위 기준 명단 복사 완료 ✓','ok'));return;}
   // "새 리그전 만들기" 모달의 선수명단 textarea 형식(이름,그룹번호)과 동일하게 생성
   // → 이 순위표를 그대로 다른 리그(예: 복식)의 시작 명단으로 붙여넣기 가능
   const byGroup = computeStandings();
@@ -1626,13 +1267,6 @@ function copyStandingsAsRoster(){
     byGroup[g].forEach(function(p){ lines.push(p.name+','+(g+1)); });
   });
   copyToClipboard(lines.join('\n'), function(){ toast('명단형식 복사 완료 ✓ (새 리그전 만들기 → 선수명단에 붙여넣기)','ok'); });
-}
-function movePlayer(pid, fromG, toG){
-  const dir = toG<fromG?'승급':'강등';
-  if (!confirm(playerName(pid)+' 선수를 '+dir+'하시겠습니까?')) return;
-  wref('leagues/'+league._id+'/players/'+pid+'/group').set(toG)
-    .then(function(){ toast(dir+' 완료 ✓','ok'); })
-    .catch(function(e){ toast('오류: '+e.message,'err'); });
 }
 
 window.onload = function(){
@@ -1678,7 +1312,7 @@ const LeagueEngine = (() => {
   }
   function allocate(s,now) {
     if(s.meta.format==='team') return;
-    const ms=s.matches||{}, ps=s.players||{}, busy=new Set(), occupied=new Set(), groups={}, count={}, last={};
+    const ms=s.matches||{}, previous=Object.fromEntries(Object.entries(s.matches||{}).map(([id,m])=>[id,JSON.stringify([m.status,m.tableNum??null,m.assignedAt??null,m.referee??null])])), ps=s.players||{}, busy=new Set(), occupied=new Set(), groups={}, count={}, last={};
     const ids=Object.keys(ms).sort((a,b)=>ms[a].matchNum-ms[b].matchNum);
     for(const id of ids) {
       const m=ms[id], people=[...m.teamA,...m.teamB];
@@ -1712,6 +1346,7 @@ const LeagueEngine = (() => {
       candidates.sort((a,b)=>(ps[a].refereeCount||0)-(ps[b].refereeCount||0));
       if(candidates.length){m.referee=candidates[0];busy.add(m.referee);}
     }
+    for(const [id,m]of Object.entries(ms))if(previous[id]!==JSON.stringify([m.status,m.tableNum??null,m.assignedAt??null,m.referee??null]))m.version=(m.version||0)+1;
   }
   function rounds(ids,size,seed=1) {
     let rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
@@ -1746,7 +1381,7 @@ const LeagueEngine = (() => {
         ms['m'+(++num)]={matchNum:num,format:'team',teamAIdx:a,teamBIdx:b,status:'waiting',sets,version:0};
       }
     }else {
-      (s.meta.groupNames||[]).forEach((_,g)=>{const ids=Object.keys(s.players||{}).filter(id=>s.players[id].group===g&&!s.players[id].absent);for(const m of rounds(ids,s.meta.teamSize,seed+g))ms['m'+(++num)]={...m,matchNum:num,group:g,status:'waiting',version:0};});
+      (s.meta.groupNames||[]).forEach((_,g)=>{const ids=Object.keys(s.players||{}).filter(id=>s.players[id].group===g);for(const m of rounds(ids,s.meta.teamSize,seed+g))ms['m'+(++num)]={...m,matchNum:num,group:g,status:'waiting',version:0};});
     }
     check(num>0,'대진을 만들 수 없습니다. 그룹별 출전 인원을 확인하세요');s.matches=ms;
   }
@@ -1818,7 +1453,20 @@ const LeagueEngine = (() => {
         if(c.status==='done')check(Object.values(m.sets||{}).some(x=>setResult(x).done),'완료된 세트가 하나 이상 있어야 합니다');
         m.status=c.status;break;
       }
-      case 'absence':check(ps[c.pid],'선수가 없습니다');ps[c.pid].absent=!!c.absent;break;
+      case 'absence': {
+        check(ps[c.pid],'선수가 없습니다');ps[c.pid].absent=!!c.absent;
+        // Repair schedules created by older versions that omitted absent pupils.
+        if(!c.absent && s.meta.format!=='team' && Object.keys(s.matches).length &&
+           !Object.values(s.matches).some(m=>[...m.teamA,...m.teamB].includes(c.pid))) {
+          const group=ps[c.pid].group, ids=Object.keys(ps).filter(id=>ps[id].group===group);
+          let num=Math.max(0,...Object.values(s.matches).map(m=>Number(m.matchNum)||0));
+          for(const match of rounds(ids,s.meta.teamSize,1).filter(m=>[...m.teamA,...m.teamB].includes(c.pid))) {
+            let id;do{id='m'+(++num);}while(s.matches[id]);
+            s.matches[id]={...match,matchNum:num,group,status:'waiting',version:0};
+          }
+        }
+        break;
+      }
       case 'tables':check(Number.isInteger(c.count)&&c.count>=1&&c.count<=10,'테이블은 1~10개입니다');s.meta.tableCount=c.count;break;
       case 'playerAdd':check(!ps[c.pid],'이미 존재하는 선수입니다'); // fall through
       case 'playerEdit': {
@@ -1835,10 +1483,17 @@ const LeagueEngine = (() => {
       case 'generate':check(!Object.keys(s.matches).length,'대진표가 이미 있습니다. 다음 회차를 시작하세요');s.meta.epoch=(s.meta.epoch||0)+1;generate(s,c.seed||1);break;
       case 'next': case 'restore': case 'import': {
         check(c.expectedRevision===(s.meta.revision||0),'최근 기록이 변경되었습니다. 확인 후 다시 시도하세요');
-        s.archives=s.archives||{};check(Object.keys(s.archives).length<100,'보관 회차가 100개입니다. 백업 후 보관 데이터를 정리하세요');
+        s.archives=s.archives||{};
         s.archives[c.id]=snapshot(s,now,'회차 '+(s.meta.roundNumber||1));
         if(c.type==='restore'||c.type==='import'){const a=c.type==='import'?c.snapshot:s.archives[c.archiveId];check(a,'보관 회차를 찾을 수 없습니다');validateSnapshot(a);const epoch=(s.meta.epoch||0)+1;const password=s.meta.adminPassword;s.players=copy(a.players||{});s.matches=copy(a.matches||{});s.meta={...copy(a.meta),epoch,revision:s.meta.revision||0};delete s.meta.adminPassword;if(password)s.meta.adminPassword=password;}
-        else {s.matches={};s.meta.epoch=(s.meta.epoch||0)+1;s.meta.roundNumber=(s.meta.roundNumber||1)+1;for(const p of Object.values(ps))if(p.nextGroup!=null){p.group=p.nextGroup;delete p.nextGroup;}}
+        if(c.type==='import' && c.archives){
+          for(const [key,a]of Object.entries(c.archives)){validateSnapshot(a);s.archives[c.id+'_'+key]=copy(a);}
+        }
+        else if(c.type==='next'){s.matches={};s.meta.epoch=(s.meta.epoch||0)+1;s.meta.roundNumber=(s.meta.roundNumber||1)+1;for(const p of Object.values(ps))if(p.nextGroup!=null){p.group=p.nextGroup;delete p.nextGroup;}}
+        if(c.type==='import'&&c.history){
+          s.history=s.history||{};
+          for(const [key,h]of Object.entries(c.history))s.history[c.id+'_'+key]={...copy(h),epoch:-1};
+        }
         break;
       }
       case 'undo': {
@@ -1864,30 +1519,51 @@ if(typeof module!=='undefined')module.exports=LeagueEngine;
 
 </script><script>
 // Compatibility mode works with the existing database. Enable secure mode only
-// after deploying the included Functions and Rules and registering the teacher.
+// after deploying matching server Functions and Rules and registering the teacher.
 const SECURE_MODE = false;
 let leagueState=null, networkReady=false, pendingWrites=0, secureRole=null;
 let activeLeagueRef=null;
 const drafts=new Map();
 const STATION_TABLE='league_station_table_v2';
+// Compatibility-mode guard against accidental access, not a substitute for server Rules.
+const teacherSessions=new Set();
+function authorizationKey(id){return workspaceCode+'|'+id;}
+function authorizeTeacher(id){teacherSessions.add(authorizationKey(id));}
+function hasTeacherSession(id){return teacherSessions.has(authorizationKey(id));}
+
 function scoreDraftKey(id){return workspaceCode+'|'+currentLeagueId+'|'+(league?.epoch||0)+'|'+id;}
+function inputMatchId(id){return Object.keys(matches).find(mid=>['sa-','sb-','dsa-','dsb-'].some(prefix=>id===prefix+mid)||id.startsWith('tg-'+mid+'-'));}
+function scoreSignature(id,match){
+  if(!match)return null;
+  if(id.startsWith('tg-')){
+    const mid=inputMatchId(id), tail=id.slice(('tg-'+mid+'-').length).split('-'), si=tail[0], gi=Number(tail[1]);
+    const set=match.sets?.[si];if(!set)return null;
+    // Another set's score does not invalidate this draft; lineup, status and earlier games do.
+    return JSON.stringify([match.status,set.playersA||{},set.playersB||{},Array.from({length:gi+1},(_,i)=>set.games?.[i]||{})]);
+  }
+  return JSON.stringify([match.version||0,match.status,match.tableNum??null,match.scoreA??null,match.scoreB??null]);
+}
+function persistDrafts(){try{sessionStorage.setItem('league_drafts_v2',JSON.stringify([...drafts]));}catch(e){}}
 function saveDraft(el){
-  if(!el.id||!el.matches('input[type=number]'))return;
-  const mid=Object.keys(matches).find(id=>['sa-','sb-','dsa-','dsb-'].some(prefix=>el.id===prefix+id)||el.id.startsWith('tg-'+id+'-'));if(!mid)return;
-  const key=scoreDraftKey(el.id), old=drafts.get(key);
-  drafts.set(key,{value:el.value,version:old?old.version:(matches[mid].version||0),mid});
-  try{sessionStorage.setItem('league_drafts_v2',JSON.stringify([...drafts]));}catch(e){}
+  if(!el?.id||!el.matches('input[type=number]')||el.disabled||!el.dataset.draftKey)return;
+  // The rendered field owns its epoch and signature, even if a new snapshot just arrived.
+  const key=el.dataset.draftKey,old=drafts.get(key);
+  drafts.set(key,{value:el.value,version:old?.version??Number(el.dataset.version),mid:el.dataset.mid,signature:old?.signature??el.dataset.signature});
+  persistDrafts();
 }
 function preserveRender(render){
-  const active=document.activeElement, focusId=active?.id;
+  const active=document.activeElement, focusId=active?.id,focusKey=active?.dataset.draftKey;
   if(active?.matches('input[type=number]'))saveDraft(active);
   render();
   document.querySelectorAll('#table-grid input[type=number],#done-list input[type=number]').forEach(el=>{
-    const d=drafts.get(scoreDraftKey(el.id));if(!d||el.disabled)return;
+    const mid=inputMatchId(el.id);if(!mid)return;
+    const key=scoreDraftKey(el.id),signature=scoreSignature(el.id,matches[mid]);
+    el.dataset.draftKey=key;el.dataset.mid=mid;el.dataset.version=matches[mid].version||0;el.dataset.signature=signature;
+    const d=drafts.get(key);if(!d||el.disabled)return;
     el.value=d.value;
-    if((matches[d.mid]?.version||0)!==d.version){el.style.borderColor='var(--orange)';el.title='다른 기기에서 변경되었습니다. 입력값을 확인하고 다시 입력하세요';}
+    if(d.signature!==signature){el.style.borderColor='var(--orange)';el.title='경기가 변경되었습니다. 제출 시 최신 상태를 확인합니다';}
   });
-  const focus=focusId&&document.getElementById(focusId);if(focus&&!focus.disabled)focus.focus({preventScroll:true});
+  const focus=focusId&&document.getElementById(focusId);if(focus&&!focus.disabled&&focus.dataset.draftKey===focusKey)focus.focus({preventScroll:true});
 }
 const baseRenderSchedule=renderSchedule;
 renderSchedule=function(){preserveRender(baseRenderSchedule);renderStudentStandings();renderOperations();filterStation();};
@@ -1896,10 +1572,10 @@ renderPlayers=function(){baseRenderPlayers();
   const label=document.querySelector('#schedule-gen-area button');if(label&&Object.keys(matches).length)label.textContent='📚 결과 보관 · 다음 회차';
 };
 function draftVersion(ids,mid){
-  const ds=ids.map(id=>drafts.get(scoreDraftKey(id))).filter(Boolean);
-  if(ds.some(d=>d.version!==(matches[mid]?.version||0))){
-    ids.forEach(id=>drafts.delete(scoreDraftKey(id)));
-    throw new Error('다른 기기에서 경기가 변경되었습니다. 최신 결과와 입력값을 확인한 후 다시 제출하세요');
+  const stale=ids.some(id=>{const d=drafts.get(scoreDraftKey(id));return d&&d.signature!==scoreSignature(id,matches[mid]);});
+  if(stale){
+    if(!confirm('이 입력 이후 경기 상태 또는 점수가 변경되었습니다. 현재 화면의 선수와 점수를 확인했나요? 확인하면 입력한 점수를 제출합니다.'))throw new Error('제출을 취소했습니다. 입력값은 유지됩니다');
+    ids.forEach(id=>{const d=drafts.get(scoreDraftKey(id));if(d){d.signature=scoreSignature(id,matches[mid]);d.version=matches[mid]?.version||0;}});persistDrafts();
   }
   return matches[mid]?.version||0;
 }
@@ -1913,10 +1589,14 @@ async function sendCommand(data){
   await ref.once('value');let failure;
   const result=await ref.transaction(state=>{
     if(!state)return;
-    try{failure=null;return LeagueEngine.reduce(state,c,{role:studentLocked?'student':'teacher'},Date.now());}
+    try{failure=null;return LeagueEngine.reduce(state,c,{role:studentLocked||!hasTeacherSession(leagueId)?'student':'teacher',table:studentLocked?Number(localStorage.getItem(STATION_TABLE)||0):0},Date.now());}
     catch(e){failure=e;return;}
   },undefined,false);
   if(!result.committed)throw failure||new Error('데이터가 변경되었거나 삭제되었습니다. 다시 확인하세요');
+  if(['restore','import'].includes(c.type)){
+    try{await db.ref('workspaces/'+ws+'/leagueIndex/'+leagueId).set(result.snapshot.val().meta);}
+    catch(e){toast('기록은 복원됐지만 목록 이름 갱신에 실패했습니다: '+e.message,'err');}
+  }
 }
 async function action(fn,message='저장 완료 ✓'){
   pendingWrites++;showOverlay('서버에 저장 중...');updateConnection();
@@ -1925,15 +1605,15 @@ async function action(fn,message='저장 완료 ✓'){
   finally{pendingWrites--;hideOverlay();updateConnection();}
 }
 function updateConnection(){const el=document.getElementById('connection-state');if(el){el.textContent=pendingWrites?'⏳ 서버 저장 중 · 창을 닫지 마세요':networkReady?'● 서버 연결됨':'● 연결 끊김 · 입력값 유지';el.style.color=networkReady?'var(--green)':'var(--red)';}}
-function clearMatchDrafts(mid){for(const [key,d]of drafts)if(key.startsWith(workspaceCode+'|'+currentLeagueId+'|')&&d.mid===mid)drafts.delete(key);try{sessionStorage.setItem('league_drafts_v2',JSON.stringify([...drafts]));}catch(e){}}
+function clearSubmittedDrafts(keys){for(const key of keys)drafts.delete(key);persistDrafts();}
 async function submitScore(mid){
   const a='sa-'+mid,b='sb-'+mid;
-  await action(async()=>{const version=draftVersion([a,b],mid);const [sa,sb]=LeagueEngine.scores(document.getElementById(a).value,document.getElementById(b).value);await sendCommand({type:'score',mid,a:sa,b:sb,version});clearMatchDrafts(mid);});
+  await action(async()=>{const version=draftVersion([a,b],mid);const [sa,sb]=LeagueEngine.scores(document.getElementById(a).value,document.getElementById(b).value);const keys=[a,b].map(scoreDraftKey);await sendCommand({type:'score',mid,a:sa,b:sb,version});clearSubmittedDrafts(keys);});
 }
 async function editDoneScore(mid){if(!teacherAllowed())return;
-  await action(async()=>{const a='dsa-'+mid,b='dsb-'+mid;const version=draftVersion([a,b],mid);const [sa,sb]=LeagueEngine.scores(document.getElementById(a).value,document.getElementById(b).value);await sendCommand({type:'editScore',mid,a:sa,b:sb,version});clearMatchDrafts(mid);});
+  await action(async()=>{const a='dsa-'+mid,b='dsb-'+mid;const version=draftVersion([a,b],mid);const [sa,sb]=LeagueEngine.scores(document.getElementById(a).value,document.getElementById(b).value);const keys=[a,b].map(scoreDraftKey);await sendCommand({type:'editScore',mid,a:sa,b:sb,version});clearSubmittedDrafts(keys);});
 }
-function teacherAllowed(){if(studentLocked||(SECURE_MODE&&secureRole!=='teacher')){toast('교사 화면에서 이용하세요','err');return false;}return true;}
+function teacherAllowed(){if(studentLocked||(SECURE_MODE&&secureRole!=='teacher')||(!SECURE_MODE&&currentLeagueId&&!hasTeacherSession(currentLeagueId))){toast('교사 화면에서 이용하세요','err');return false;}return true;}
 function toggleAbsentPlayer(pid){if(teacherAllowed())return action(()=>sendCommand({type:'absence',pid,absent:!players[pid].absent}),'출결 반영 완료 ✓');}
 function applyAbsentLogic(){return runAssignment();}
 function runAssignment(){return sendCommand({type:'assign'});}
@@ -1949,7 +1629,7 @@ function startTeamTie(mid){if(teacherAllowed())return action(()=>sendCommand({ty
 function pauseTeamTie(mid){if(teacherAllowed())return action(()=>sendCommand({type:'teamStatus',mid,status:'waiting'}));}
 function finishTeamTie(mid){if(teacherAllowed()&&confirm('완료된 세트로 결과를 확정할까요?'))return action(()=>sendCommand({type:'teamStatus',mid,status:'done'}));}
 function setTiePlayer(mid,si,side,slot,pid){if(teacherAllowed())return action(()=>sendCommand({type:'teamPlayer',mid,si,side,slot,pid}));renderSchedule();}
-function submitTeamGame(mid,si,gi){return action(async()=>{const a=`tg-${mid}-${si}-${gi}-a`,b=`tg-${mid}-${si}-${gi}-b`;const version=draftVersion([a,b],mid);const [sa,sb]=LeagueEngine.scores(document.getElementById(a).value,document.getElementById(b).value);await sendCommand({type:'teamScore',mid,si,gi,a:sa,b:sb,version});clearMatchDrafts(mid);});}
+function submitTeamGame(mid,si,gi){return action(async()=>{const a=`tg-${mid}-${si}-${gi}-a`,b=`tg-${mid}-${si}-${gi}-b`;const version=draftVersion([a,b],mid);const [sa,sb]=LeagueEngine.scores(document.getElementById(a).value,document.getElementById(b).value);const keys=[a,b].map(scoreDraftKey);await sendCommand({type:'teamScore',mid,si,gi,a:sa,b:sb,version});clearSubmittedDrafts(keys);});}
 function reopenTeamGame(mid,si,gi){if(teacherAllowed()&&confirm('이 게임과 이후 게임을 다시 입력하도록 열까요?'))return action(()=>sendCommand({type:'teamReopen',mid,si,gi}));}
 function setResult(s){return LeagueEngine.setResult(s);}
 function nextRound(){if(!teacherAllowed())return;if(!confirm('현재 명단과 경기 결과를 보관하고 다음 회차를 시작할까요? 예약한 승급·강등이 적용되며 대진표는 다시 생성할 수 있습니다.'))return;return action(()=>sendCommand({type:'next',expectedRevision:league.revision||0}),'이전 회차 보관 완료 · 새 대진표를 생성하세요');}
@@ -1957,7 +1637,12 @@ function restoreRound(){if(!teacherAllowed())return;const id=document.getElement
 function undoResult(id){if(teacherAllowed()&&confirm('이 점수 변경을 되돌릴까요? 이후 수정된 경기는 되돌릴 수 없습니다.'))return action(()=>sendCommand({type:'undo',historyId:id}),'점수 변경을 되돌렸습니다');}
 function downloadJSON(data,name){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function exportLeague(){if(teacherAllowed())downloadJSON({schemaVersion:2,exportedAt:new Date().toISOString(),league:leagueState},'league-backup-'+new Date().toISOString().slice(0,10)+'.json');}
-function exportCSV(){if(!teacherAllowed())return;const rows=[['조','이름','경기수','승','패','득실']];if(league.format==='team'){rows[0]=['조','승','패','무','세트득실'];computeTeamStandings().forEach(x=>rows.push([x.name,x.tieWins,x.tieLosses,x.tieDraws,x.setWins-x.setLosses]));}else Object.values(computeStandings()).flat().forEach(p=>rows.push([league.groupNames[p.group],p.name,p.wins+p.losses,p.wins,p.losses,p.pf-p.pa]));const safe=v=>'"'+String(v??'').replace(/^[=+\-@\t\r]/,"'</body>").replace(/"/g,'""')+'"';const blob=new Blob(['\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='league-standings.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function csvCell(value){
+  let text=String(value??'');
+  if(typeof value!=='number' && /^[\s]*[=+\-@]|^[\t\r]/.test(text))text="'"+text;
+  return '"'+text.replace(/"/g,'""')+'"';
+}
+function exportCSV(){if(!teacherAllowed())return;const rows=[['조','이름','경기수','승','패','득실']];if(league.format==='team'){rows[0]=['조','승','패','무','세트득실'];computeTeamStandings().forEach(x=>rows.push([x.name,x.tieWins,x.tieLosses,x.tieDraws,x.setWins-x.setLosses]));}else Object.values(computeStandings()).flat().forEach(p=>rows.push([league.groupNames[p.group],p.name,p.wins+p.losses,p.wins,p.losses,p.pf-p.pa]));const safe=csvCell;const blob=new Blob(['\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='league-standings.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function renderOperations(){
   const box=document.getElementById('operations');if(!box||!league)return;box.style.display=studentLocked?'none':'block';
   const archives=leagueState?.archives||{};
@@ -1968,8 +1653,8 @@ function renderOperations(){
   document.getElementById('history-list').innerHTML=history.map(([id,h])=>`<div class="done-row">${new Date(h.at).toLocaleTimeString('ko-KR')} · 경기 ${esc(matches[h.mid]?.matchNum||h.mid)} · ${esc(({score:'결과 제출',editScore:'점수 수정',teamScore:'게임 제출',teamReopen:'재입력',undo:'되돌림'})[h.type])} ${h.before?`<button class="btn btn-gray btn-sm" onclick="undoResult('${id}')" ${(matches[h.mid]?.version!==h.afterVersion||(h.epoch||0)!==(league.epoch||0))?'disabled':''}>되돌리기</button>`:''}</div>`).join('')||'<p class="hint">아직 변경 이력이 없습니다.</p>';
   const next=Object.values(matches).filter(m=>m.status==='waiting').sort((a,b)=>a.matchNum-b.matchNum).slice(0,5);document.getElementById('next-matches').textContent=next.length?'다음 대기: '+next.map(m=>league.format==='team'?teamName(m.teamAIdx)+' vs '+teamName(m.teamBIdx):teamLabel(m.teamA)+' vs '+teamLabel(m.teamB)).join(' / '):'대기 경기가 없습니다';
 }
-function filterStation(){const n=Number(localStorage.getItem(STATION_TABLE)||0);const sel=document.getElementById('station-table');if(sel){sel.value=n;sel.parentElement.style.display=league?.format==='team'?'none':'';sel.disabled=SECURE_MODE&&secureRole==='student';}document.querySelectorAll('.table-grid-row').forEach(row=>{let visible=false;row.querySelectorAll('.table-card').forEach(card=>{const table=Number(card.querySelector('.tc-tablenum-big')?.textContent.replace(/\D/g,''));const show=!studentLocked||!n||n===table;card.style.display=show?'':'none';visible=visible||show;});row.style.display=visible?'':'none';});}
-function setStationTable(v){localStorage.setItem(STATION_TABLE,v);filterStation();}
+function filterStation(){const n=Number(localStorage.getItem(STATION_TABLE)||0);const sel=document.getElementById('station-table');if(sel){sel.value=n;sel.parentElement.style.display=league?.format==='team'?'none':'';sel.disabled=studentLocked;}document.querySelectorAll('.table-grid-row').forEach(row=>{let visible=false;row.querySelectorAll('.table-card').forEach(card=>{const table=Number(card.querySelector('.tc-tablenum-big')?.textContent.replace(/\D/g,''));const show=!studentLocked||!n||n===table;card.style.display=show?'':'none';visible=visible||show;});row.style.display=visible?'':'none';});}
+function setStationTable(v){if(studentLocked)return;localStorage.setItem(STATION_TABLE,v);filterStation();}
 const baseApplyStudentLock=applyStudentLockUI;
 applyStudentLockUI=function(){baseApplyStudentLock();isTeacher=false;if(league)renderSchedule();};
 const baseRemoveStudentLock=removeStudentLockUI;
@@ -2017,7 +1702,7 @@ async function restoreSecureSession(){
 async function persistNewLeague(id,data){
   if(!teacherAllowed())throw new Error('교사 권한이 필요합니다');
   if(SECURE_MODE){delete data.meta.adminPassword;await callServer('leagueAdmin',{workspace:workspaceCode,operation:'create',leagueId:id,league:data});}
-  else {await wref('leagues/'+id).set(data);await wref('leagueIndex/'+id).set(data.meta);}
+  else {await wref('').update({['leagues/'+id]:data,['leagueIndex/'+id]:data.meta});authorizeTeacher(id);}
 }
 function loadHome(){
   if(SECURE_MODE&&secureRole==='student')return;
@@ -2025,7 +1710,7 @@ function loadHome(){
   wref('leagueIndex').off();
   wref('leagueIndex').on('value',snap=>{leaguesIndex=snap.val()||{};renderHome();},e=>toast('목록을 불러올 수 없습니다: '+e.message,'err'));
   // A one-time compatibility migration builds the small home index.
-  if(!SECURE_MODE)wref('indexVersion').once('value').then(async snap=>{if(snap.val()===2)return;const leagues=(await wref('leagues').once('value')).val()||{};const index={};Object.entries(leagues).forEach(([id,l])=>index[id]=l.meta||{});await wref('').update({leagueIndex:index,indexVersion:2});}).catch(e=>toast('목록 구성 실패: '+e.message,'err'));
+  if(!SECURE_MODE){const root=wref('');root.child('indexVersion').once('value').then(async snap=>{if(snap.val()===2)return;await root.transaction(state=>{if(!state||state.indexVersion===2)return;state.leagueIndex=Object.fromEntries(Object.entries(state.leagues||{}).map(([id,l])=>[id,l.meta||{}]));state.indexVersion=2;return state;},undefined,false);}).catch(e=>toast('목록 구성 실패: '+e.message,'err'));}
 }
 function deleteLeague(id,name){
   if(!teacherAllowed())return;
@@ -2054,7 +1739,40 @@ const originalUnlockStudent=unlockStudentStation;
 unlockStudentStation=function(){if(SECURE_MODE){document.getElementById('page-gate').classList.add('on');document.getElementById('page-league').classList.remove('on');document.getElementById('gate-code-input').value=workspaceCode;toast('교사 Google 로그인으로 잠금을 해제하세요');}else originalUnlockStudent();};
 const originalTryUnlock=tryUnlock;
 tryUnlock=function(){if(SECURE_MODE){if(teacherAllowed()){adminUnlocked=true;renderStandings();}}else originalTryUnlock();};
-async function importBackup(){if(!teacherAllowed())return;const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.onchange=async()=>{const file=input.files[0];if(!file)return;await action(async()=>{if(file.size>2*1024*1024)throw new Error('백업은 2MB 이하만 복원할 수 있습니다');const data=JSON.parse(await file.text());if(data.schemaVersion!==2||!data.league)throw new Error('이 버전에서 내보낸 백업 파일을 선택하세요');if(!confirm('백업의 현재 회차를 복원할까요? 현재 회차는 먼저 보관되며, 백업 안의 과거 보관 회차는 가져오지 않습니다.'))return;await sendCommand({type:'import',snapshot:{meta:data.league.meta,players:data.league.players||{},matches:data.league.matches||{}},expectedRevision:league.revision||0});});};input.click();}
+function validateFullBackup(data){
+  if(data?.schemaVersion!==2||!data.league)throw new Error('이 앱에서 내보낸 백업 파일을 선택하세요');
+  LeagueEngine.validateSnapshot(data.league);
+  for(const [id,a]of Object.entries(data.league.archives||{})){
+    if(!/^[\w-]+$/.test(id))throw new Error('백업 회차 ID가 올바르지 않습니다');
+    LeagueEngine.validateSnapshot(a);
+  }
+  for(const [id,h]of Object.entries(data.league.history||{})){
+    if(!/^[\w-]+$/.test(id)||!h||typeof h.type!=='string'||!Number.isFinite(h.at))throw new Error('백업 변경 이력이 올바르지 않습니다');
+  }
+  return data.league;
+}
+async function importBackup(asNew=false){
+  if(!teacherAllowed())return;
+  const targetId=currentLeagueId, targetWorkspace=workspaceCode;
+  const input=document.createElement('input');input.type='file';input.accept='.json,application/json';
+  input.onchange=async()=>{
+    const file=input.files[0];if(!file)return;
+    await action(async()=>{
+      if(file.size>50*1024*1024)throw new Error('50MB 이하의 백업 파일을 선택하세요');
+      const backup=validateFullBackup(JSON.parse(await file.text()));
+      if(workspaceCode!==targetWorkspace||currentLeagueId!==targetId)throw new Error('화면이 변경되었습니다. 현재 화면에서 다시 가져오세요');
+      if(asNew){
+        if(!confirm('현재 회차·과거 보관 회차·변경 이력을 새 리그로 가져올까요?'))return;
+        if(SECURE_MODE)throw new Error('보안 모드의 전체 백업 가져오기는 서버 기능도 함께 업데이트해야 합니다');
+        const id=uid();await persistNewLeague(id,backup);authorizeTeacher(id);enterLeague(id);
+      }else{
+        if(!confirm('백업의 현재 회차와 모든 과거 보관 회차를 복원할까요? 지금의 회차와 기존 보관 기록도 유지됩니다.'))return;
+        if(SECURE_MODE)throw new Error('보안 모드의 전체 백업 복원은 서버 기능도 함께 업데이트해야 합니다');
+        await sendCommand({type:'import',snapshot:{meta:backup.meta,players:backup.players||{},matches:backup.matches||{}},archives:backup.archives||{},history:backup.history||{},expectedRevision:league.revision||0});
+      }
+    },'전체 백업 가져오기 완료 ✓');
+  };input.click();
+}
 
 </script></body>
 </html>
