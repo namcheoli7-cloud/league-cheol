@@ -1159,11 +1159,18 @@ function computeStandings(){
     byGroup[g].push(Object.assign({pid:pid}, stats[pid]));
   });
   Object.keys(byGroup).forEach(function(g){
-    byGroup[g].sort((a,b)=> b.wins-a.wins || (b.pf-b.pa)-(a.pf-a.pa));
-    byGroup[g].forEach((p,i,list)=>{p.rank=i>0&&p.wins===list[i-1].wins&&(p.pf-p.pa)===(list[i-1].pf-list[i-1].pa)?list[i-1].rank:i+1;});
+    const list=byGroup[g];
+    list.forEach(p=>{p.played=p.wins+p.losses;p.winRate=p.played?p.wins/p.played:null;});
+    // Compare unrounded fractions; displayed percentages are rounded only for readability.
+    const compare=(a,b)=>Number(b.played>0)-Number(a.played>0)
+      || (a.played&&b.played ? b.wins*a.played-a.wins*b.played : 0)
+      || b.wins-a.wins || (b.pf-b.pa)-(a.pf-a.pa);
+    list.sort(compare);
+    list.forEach((p,i)=>{p.rank=!p.played?null:i>0&&compare(p,list[i-1])===0?list[i-1].rank:i+1;});
   });
   return byGroup;
 }
+function winRateLabel(p){return p.played?(p.winRate*100).toFixed(1)+'%':'미참가';}
 function computeTeamStandings(){
   const teamNames = league.groupNames || [];
   const stats = teamNames.map(function(nm, i){ return {idx:i, name:nm, tieWins:0, tieLosses:0, tieDraws:0, setWins:0, setLosses:0}; });
@@ -1204,11 +1211,11 @@ function buildStandingsHtml(showActions){
   groups.forEach(function(g){
     const list = byGroup[g];
     html += `<div class="gsep"><span class="gb g${g%5}">${esc(groupNames[g]||'그룹'+(g+1))}</span><span style="font-size:12px;color:var(--text3)">${list.length}명</span><div class="gsep-line"></div></div>
-    <div class="sw"><table class="rt"><thead><tr><th>순위</th><th>이름</th>${league.isMerged?'<th>반</th>':''}<th>승</th><th>패</th><th>득실</th>${showActions?'<th>승강</th>':''}</tr></thead><tbody>`;
+    <div class="sw"><table class="rt"><thead><tr><th>순위</th><th>이름</th>${league.isMerged?'<th>반</th>':''}<th>승</th><th>패</th><th>승률</th><th>득실</th>${showActions?'<th>승강</th>':''}</tr></thead><tbody>`;
     list.forEach(function(p,i){
       const diff = p.pf-p.pa;
-      html += `<tr><td>${p.rank}</td><td><b>${esc(p.name)}</b></td>${league.isMerged?`<td style="font-size:11px;color:var(--text3)">${esc(p.class||'')}</td>`:''}
-        <td class="win">${p.wins}</td><td class="loss">${p.losses}</td><td>${diff>0?'+':''}${diff}</td>
+      html += `<tr><td>${p.rank??'—'}</td><td><b>${esc(p.name)}</b></td>${league.isMerged?`<td style="font-size:11px;color:var(--text3)">${esc(p.class||'')}</td>`:''}
+        <td class="win">${p.wins}</td><td class="loss">${p.losses}</td><td>${winRateLabel(p)}</td><td>${diff>0?'+':''}${diff}</td>
         ${showActions?`<td>
           ${g>0?`<button class="up-btn" onclick="movePlayer('${p.pid}',${g},${g-1})">▲</button>`:''}
           ${g<groupNames.length-1?`<button class="dn-btn" onclick="movePlayer('${p.pid}',${g},${g+1})">▼</button>`:''}
@@ -1217,7 +1224,7 @@ function buildStandingsHtml(showActions){
     });
     html += '</tbody></table></div>';
   });
-  return html+'<p class="hint">순위: 승수 → 득실. 완전 동률은 공동 순위입니다. 결석으로 경기 수가 다를 수 있습니다. 과거 동점 기록은 승패 집계에서 제외됩니다.</p>';
+  return html+'<p class="hint">순위: 승률 → 승수 → 득실차. 승률 = 승 ÷ (승 + 패). 완전 동률은 공동 순위이며, 미참가 학생은 순위에서 제외됩니다. 승률은 소수점 첫째 자리까지 표시하되 순위는 반올림 전 값으로 계산합니다. 과거 동점 기록은 승패 집계에서 제외됩니다.</p>';
 }
 function renderStandings(){
   document.getElementById('standings-area').innerHTML = buildStandingsHtml(adminUnlocked);
@@ -1642,7 +1649,7 @@ function csvCell(value){
   if(typeof value!=='number' && /^[\s]*[=+\-@]|^[\t\r]/.test(text))text="'"+text;
   return '"'+text.replace(/"/g,'""')+'"';
 }
-function exportCSV(){if(!teacherAllowed())return;const rows=[['조','이름','경기수','승','패','득실']];if(league.format==='team'){rows[0]=['조','승','패','무','세트득실'];computeTeamStandings().forEach(x=>rows.push([x.name,x.tieWins,x.tieLosses,x.tieDraws,x.setWins-x.setLosses]));}else Object.values(computeStandings()).flat().forEach(p=>rows.push([league.groupNames[p.group],p.name,p.wins+p.losses,p.wins,p.losses,p.pf-p.pa]));const safe=csvCell;const blob=new Blob(['\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='league-standings.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function exportCSV(){if(!teacherAllowed())return;const rows=[['조','이름','경기수','승','패','승률','득실']];if(league.format==='team'){rows[0]=['조','승','패','무','세트득실'];computeTeamStandings().forEach(x=>rows.push([x.name,x.tieWins,x.tieLosses,x.tieDraws,x.setWins-x.setLosses]));}else Object.values(computeStandings()).flat().forEach(p=>rows.push([league.groupNames[p.group],p.name,p.played,p.wins,p.losses,winRateLabel(p),p.pf-p.pa]));const safe=csvCell;const blob=new Blob(['\uFEFF'+rows.map(row=>row.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='league-standings.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function renderOperations(){
   const box=document.getElementById('operations');if(!box||!league)return;box.style.display=studentLocked?'none':'block';
   const archives=leagueState?.archives||{};
