@@ -15,6 +15,8 @@
 body{font-family:'Noto Sans KR',-apple-system,sans-serif;background:var(--surface3);color:var(--text);font-size:14px;}
 /* 태블릿에서 화면 맨 위를 끌어내려 실수로 새로고침되는 것 방지 */
 html,body{overscroll-behavior-y:contain;}
+/* 위에 고정된 파란 헤더에 순위표 제목이 가려지지 않도록 여백 */
+#panel-standings,#student-standings-card{scroll-margin-top:64px;}
 .hdr{background:var(--blue);color:#fff;height:52px;display:flex;align-items:center;padding:0 16px;gap:10px;position:sticky;top:0;z-index:100;}
 .hdr h1{font-size:15px;font-weight:700;margin-right:auto;}
 .back-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}
@@ -265,6 +267,7 @@ textarea{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px
       <div class="card">
         <div class="card-head">🗓 테이블별 경기 현황
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-orange" style="font-size:14px;padding:8px 16px" onclick="scrollToStandings()">🏆 순위 보기 ↓</button>
             <span id="schedule-admin-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <label style="font-size:12px;font-weight:700;">테이블 수</label>
               <select id="table-count-sel" onchange="doChangeTableCount(this.value)">
@@ -1163,6 +1166,13 @@ function sortDoneNewestFirst(ids){
   return ids.slice().sort(function(a,b){
     return (matches[b].completedAt||0)-(matches[a].completedAt||0) || (matches[b].matchNum||0)-(matches[a].matchNum||0);
   });
+}
+
+// ══ 경기 현황 → 순위로 바로 이동 ══
+// 학생 전용 화면이면 그 화면 안의 '현재 순위' 카드로, 일반 화면이면 아래 순위표로 부드럽게 스크롤
+function scrollToStandings(){
+  const target = studentLocked ? document.getElementById('student-standings-card') : document.getElementById('panel-standings');
+  if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function toggleTeacherMode(){
