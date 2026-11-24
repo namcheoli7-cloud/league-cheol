@@ -13,6 +13,8 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Noto Sans KR',-apple-system,sans-serif;background:var(--surface3);color:var(--text);font-size:14px;}
+/* 태블릿에서 화면 맨 위를 끌어내려 실수로 새로고침되는 것 방지 */
+html,body{overscroll-behavior-y:contain;}
 .hdr{background:var(--blue);color:#fff;height:52px;display:flex;align-items:center;padding:0 16px;gap:10px;position:sticky;top:0;z-index:100;}
 .hdr h1{font-size:15px;font-weight:700;margin-right:auto;}
 .back-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;}
@@ -460,6 +462,7 @@ let listenersAttached = false;
 let workspaceCode = null;
 const WS_STORAGE_KEY = 'league_workspace_code_v1';
 const STUDENT_LOCK_KEY = 'league_student_lock_v1';
+const LAST_LEAGUE_KEY = 'league_last_open_v1'; // "교사코드|리그ID" — 새로고침 후 복귀용
 
 // ══════════════ 교사 코드(워크스페이스) ══════════════
 function sanitizeCode(raw){
@@ -483,7 +486,10 @@ function showWorkspace(){
   document.getElementById('ws-tag').textContent = '🔑 ' + workspaceCode;
   loadHome();
   const lockedId = localStorage.getItem(STUDENT_LOCK_KEY);
-  if (lockedId){ enterLeague(lockedId); }
+  if (lockedId){ enterLeague(lockedId); return; }
+  // 새로고침해도 보고 있던 학급으로 바로 복귀 (같은 교사 코드일 때만)
+  const last = (localStorage.getItem(LAST_LEAGUE_KEY)||'').split('|');
+  if (last.length===2 && last[0]===workspaceCode && last[1]){ enterLeague(last[1]); }
 }
 function confirmSwitchWorkspace(){
   if (localStorage.getItem(STUDENT_LOCK_KEY)){ toast('학생 입력 전용 태블릿에서는 코드 전환이 제한됩니다. 잠금 해제 후 이용하세요','err'); return; }
@@ -720,6 +726,7 @@ async function enterLeague(id){
   // "📱 이 태블릿 학생입력 전용으로" 버튼으로 고정하고, 해제할 때만 비밀번호를 확인합니다.
   if(!SECURE_MODE&&!isLockedForLeague(id))authorizeTeacher(id);
   currentLeagueId = id; isTeacher=false; adminUnlocked=false;
+  localStorage.setItem(LAST_LEAGUE_KEY, workspaceCode+'|'+id);
   document.getElementById('page-home').classList.remove('on');
   document.getElementById('page-league').classList.add('on');
   if (isLockedForLeague(id)){
@@ -745,6 +752,7 @@ async function enterLeague(id){
 }
 function goHome(){
   currentLeagueId=null;
+  localStorage.removeItem(LAST_LEAGUE_KEY); // "← 목록"을 직접 눌렀을 때만 기억 삭제
   clearElapsedTicker();
   if (listenersAttached){ wref('leagues/'+ (league?league._id:'')).off(); }
   document.getElementById('page-league').classList.remove('on');
